@@ -1343,8 +1343,8 @@ const MusicPlayer = {
     // 一旦暂停就不再触发 → 按钮图标停留在暂停前的状态，
     // 造成"界面显示的状态"和"真实播放状态"不一致（按 F3 时看着像行为反了）。
     // 同时刷新进度条/按钮图标，保证界面与真实播放状态始终一致。
-    this.audio.addEventListener('play', () => this.renderProgress());
-    this.audio.addEventListener('pause', () => this.renderProgress());
+    this.audio.addEventListener('play', () => { this._playIntent = true; this.renderProgress(); });
+    this.audio.addEventListener('pause', () => { this._playIntent = false; this.renderProgress(); });
 
     $('#mp-play').addEventListener('click', () => this.toggle());
     $('#mp-prev').addEventListener('click', () => this.prev());
@@ -1412,21 +1412,30 @@ const MusicPlayer = {
    * 这里的捕获只做两件事：
    *   1) 真正失败（格式不支持、找不到文件等）时明确提示，不再静默 console.warn
    *   2) AbortError（被后续 play/pause 打断）静默忽略——那是正常竞争，不是失败
-   * 注意：不在这里维护任何"意图状态"。此前用 _wantsPlay 记录意图的做法是错的：
-   * 意图本身要靠 play/pause 事件异步同步，事件没到达时它就是过期值，
-   * 会让 toggle 的判断忽对忽错。判断只依据 audio.paused 这一个真实来源。 */
+   *
+   * 关于 _playIntent：play() 是异步的，调用后 audio.paused 不会立刻变 false。
+   * 在这段"启动窗口期"里，单看 paused 会误判成"还没播放"，导致下一次 toggle
+   * 又去调 play()（表现为连按没反应、按一次触发多次）。
+   * 因此这里额外维护一个**同步**更新的意图标记：调用 play 前立即置 true、
+   * 调用 pause 前立即置 false，由意图与真实状态共同决定 toggle 的走向。 */
   _startPlayback() {
+    this._playIntent = true;
     const p = this.audio.play();
     if (!p || typeof p.then !== 'function') { this.renderPlaylist(); this.renderProgress(); return; }
     p.then(() => {
+      // 播放真的开始了，意图与真实状态此时一致
+      this._playIntent = true;
       this.renderPlaylist();
       this.renderProgress();
     }).catch((e) => {
       const name = (e && e.name) || '';
       if (name === 'AbortError' || /interrupted by a call to (pause|play)/i.test((e && e.message) || '')) {
+        // 被后续操作打断：意图以"最后一次操作"为准，这里不覆盖
         this.renderProgress();
         return;
       }
+      // 真正失败：回滚意图，否则界面会一直以为在播放
+      this._playIntent = false;
       toast('播放失败：' + ((e && e.message) || e), 3500);
       this.renderPlaylist();
       this.renderProgress();
@@ -1446,16 +1455,27 @@ const MusicPlayer = {
     this.renderProgress();
   },
   /* 播放 ↔ 暂停 切换。
-   * 唯一依据是 audio.paused（浏览器给的真实播放状态），不引入额外状态。
-   * 说明：play() 是异步的，调用后 paused 不会立刻变；但这不影响正确性——
-   * 若上一次 play() 还没完成，这一次会走 pause 分支，产生的 AbortError
-   * 已被 _startPlayback 静默忽略，最终状态仍是"暂停"，符合"切换"预期。 */
+   *
+   * 判断同时用两个信息源，缺一不可：
+   *   - audio.paused  ：真实播放状态（权威，但 play() 启动期间会滞后）
+   *   - _playIntent   ：最近一次操作的意图（同步更新，覆盖启动窗口期）
+   *
+   * 只依据 paused 会在"刚点播放、还没真正开始"时误判为暂停态，
+   * 于是再按一次又去 play()，表现为"连按无反应"。
+   * 只依据意图则在播放失败/外部暂停时会与实际不符。两者结合才正确。 */
   toggle() {
     if (!this.audio.src) { if (this.playlist.length) this.play(this.index); return; }
-    if (this.audio.paused) {
-      this._startPlayback();
-    } else {
+
+    // 判定"当前是否应当被视为正在播放"：
+    // 真实在播 → 是；否则看意图——若刚请求播放且尚未被否定，也视为播放中（启动中）
+    const starting = this._playIntent === true && this.audio.paused;
+    const playing = !this.audio.paused || starting;
+
+    if (playing) {
+      this._playIntent = false;   // 先同步置意图，避免异步竞态
       this.audio.pause();
+    } else {
+      this._startPlayback();      // 内部会把 _playIntent 置 true
     }
     this.renderPlaylist();
     // 必须刷新进度条/按钮图标：renderPlaylist 不会更新按钮，图标只在 renderProgress 里改。
