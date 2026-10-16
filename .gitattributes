@@ -1,0 +1,22 @@
+# 统一换行符：仓库内一律用 LF，避免跨平台协作时整个文件显示为改动
+* text=auto eol=lf
+
+# 明确文本类型
+*.js    text eol=lf
+*.json  text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+
+# Windows 批处理必须保持 CRLF，否则 cmd 会报错
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# 二进制文件不做换行处理
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.zip   binary
+*.exe   binary
