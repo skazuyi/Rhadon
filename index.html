@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>个人工作台</title>
+<title>Rhadon</title>
 <style>
 /* ============ 全局变量与重置 ============ */
 :root {
@@ -653,7 +653,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 
 <script>
 /* ============================================================
- * 个人工作台 - 核心引擎（修复版）
+ * Rhadon - 核心引擎
  * 纯原生 JS，数据驱动，单 HTML 文件
  * 兼容两种运行方式：
  *   A. 浏览器（file:// 或 http://）— 用浏览按钮 + File API
@@ -3664,7 +3664,7 @@ function alarmLoop() {
       a.firedFor = cur;
       beep();
       toast('⏰ 闹钟响！' + (a.label ? '（' + a.label + '）' : ''));
-      try { new Notification('个人工作台', { body: '闹钟：' + (a.label || a.time) }); } catch(e){}
+      try { new Notification('Rhadon', { body: '闹钟：' + (a.label || a.time) }); } catch(e){}
     }
   });
 }
@@ -3820,7 +3820,7 @@ function boot() {
     ['timer','alarm','music','clock'].forEach(id => { try { WindowManager.create(id); } catch(e){} });
     State._booted = true;
   }
-  setTimeout(() => toast('欢迎使用个人工作台 · Ctrl+S 保存 · Ctrl+Alt+N 新建便签', 4500), 800);
+  setTimeout(() => toast('欢迎使用 Rhadon · Ctrl+S 保存 · Ctrl+Alt+N 新建便签', 4500), 800);
 }
 
 /* ---------- 便签管理窗口应用 ---------- */

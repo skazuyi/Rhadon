@@ -58,7 +58,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: '个人工作台',
+    title: 'Rhadon',
     autoHideMenuBar: true,
     backgroundColor: '#1e1e2e',
     icon: iconPath || undefined,
