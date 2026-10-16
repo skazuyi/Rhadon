@@ -8,6 +8,7 @@
 全部由 `index.html` + Electron 构成，无需构建工具，改完即生效。
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Icon](https://img.shields.io/badge/icon-all%20rights%20reserved-red)](lambda.ico.LICENSE.txt)
 [![Electron](https://img.shields.io/badge/Electron-31-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/skazuyi/Rhadon)
 
@@ -283,14 +284,16 @@ definePlugin({
 
 ```
 Rhadon/
-├── index.html              # 主程序（桌面 UI + 全部前端逻辑）
-├── main_clean.js           # Electron 主进程（文件系统、剪贴板、局域网传输服务）
-├── preload.js              # 预加载脚本（IPC 桥接，contextBridge 白名单）
-├── package.json            # 依赖与打包配置
-├── lambda.ico              # 应用图标
+├── index.html                  # 主程序（桌面 UI + 全部前端逻辑）
+├── main_clean.js               # Electron 主进程（文件系统、剪贴板、局域网传输服务）
+├── preload.js                  # 预加载脚本（IPC 桥接，contextBridge 白名单）
+├── package.json                # 依赖与打包配置
+├── lambda.ico                  # 应用图标（⚠️ 非 MIT 授权，见 License）
+├── lambda.ico.LICENSE.txt      # 图标授权说明
 ├── examples/
-│   └── altx-keepalive.js   # 插件示例：Alt+X 后台挂起开关
+│   └── altx-keepalive.js       # 插件示例：Alt+X 后台挂起开关
 ├── LICENSE
+├── .gitattributes
 └── .gitignore
 ```
 
@@ -342,3 +345,13 @@ Rhadon 能识别指向**文件夹**的快捷方式并直接进入。如果目标
 ## License
 
 [MIT](LICENSE) © skazuyi
+
+> ### ⚠️ 资源文件例外
+>
+> **`lambda.ico` 不在 MIT 许可范围内，不授予任何授权。**
+>
+> 该图标为版权所有者的个人资源，保留所有权利。它出现在仓库中仅作为构建配置的一部分。
+>
+> **如果你 fork 或再分发本项目，请务必移除或替换该文件**——详见 [`lambda.ico.LICENSE.txt`](lambda.ico.LICENSE.txt)。
+>
+> 其余源码（`index.html`、`main_clean.js`、`preload.js` 等）均适用 MIT 协议，可自由使用、修改、分发。

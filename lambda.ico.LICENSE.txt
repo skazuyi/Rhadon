@@ -1,0 +1,53 @@
+# 关于 lambda.ico
+
+## 这不是开源资源
+
+**`lambda.ico` 不适用本项目的 MIT 许可协议。**
+
+版权所有，保留所有权利（All Rights Reserved）。
+
+本图标不授予任何形式的授权，包括但不限于：
+
+- 使用
+- 复制
+- 修改
+- 再分发
+- 用于衍生作品
+
+它出现在本仓库中，**仅仅是原作者构建配置的一部分**（用于生成应用图标）。
+
+## 如果你 fork 或再分发本项目
+
+**你必须移除或替换这个文件。**
+
+否则，你的构建产物将包含一个你没有使用权的资源。
+
+可以自行准备一个 `.ico` 图标（建议 256×256、32bpp），然后：
+
+1. 用你的图标替换 `lambda.ico`
+2. 或者修改 `package.json`，把 `build.win.icon` 和 `build.extraResources` 指向你的文件名
+
+## 需要授权？
+
+如需使用该图标，请联系版权持有人取得**明确的书面许可**。
+
+---
+
+## English
+
+**`lambda.ico` is NOT covered by this project's MIT License.**
+
+Copyright holder reserves all rights.
+
+No permission or license of any kind is granted for this file — including use,
+copying, modification, redistribution, or derivative works.
+
+It is included in this repository solely as part of the original author's build
+configuration.
+
+**If you fork or redistribute this project, you must remove or replace this
+asset.** Otherwise your build output will contain a resource you have no right
+to use.
+
+For licensing inquiries, contact the copyright holder for explicit written
+permission.

@@ -19,3 +19,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+EXCEPTIONS — ASSETS NOT COVERED BY THE MIT LICENSE
+================================================================================
+
+The MIT License above applies to the source code of this project ONLY.
+
+The following files are EXCLUDED from the MIT License and are NOT licensed for
+use, copying, modification, redistribution, or any other purpose. All rights
+are reserved by the copyright holder:
+
+    lambda.ico
+
+No permission or license of any kind is granted for the file listed above.
+It is included in this repository solely as part of the original author's
+build configuration. You may not reuse, redistribute, or create derivative
+works from it without explicit written permission from the copyright holder.
+
+If you fork or redistribute this project, you MUST remove or replace this
+asset with your own.
+
+--------------------------------------------------------------------------------
+以下文件不属于 MIT 许可范围，不授予任何使用、复制、修改或再分发权利，
+所有权利由版权持有人保留：
+
+    lambda.ico
+
+该文件仅作为原作者构建配置的一部分存在于本仓库。如需使用，必须事先获得
+版权持有人的明确书面许可。任何人 fork 或再分发本项目时，必须移除或替换
+该资源文件。
