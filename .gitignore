@@ -1,6 +1,12 @@
 # 依赖
 node_modules/
+node_modules*.zip
 package-lock.json
+
+# 压缩包（不应提交）
+*.zip
+*.7z
+*.rar
 
 # 构建产物
 dist/
