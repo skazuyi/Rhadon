@@ -1,0 +1,55 @@
+{
+  "name": "rhadon",
+  "version": "1.0.0",
+  "description": "Rhadon: A personal workbench - a desktop-style workspace built with HTML, running in Electron",
+  "main": "main_clean.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "author": "skazuyi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/skazuyi/Rhadon.git"
+  },
+  "keywords": [
+    "electron",
+    "desktop",
+    "workbench",
+    "workspace",
+    "lan-file-transfer"
+  ],
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.skazuyi.rhadon",
+    "productName": "Rhadon",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "main_clean.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "lambda.ico",
+        "to": "lambda.ico"
+      }
+    ],
+    "win": {
+      "icon": "lambda.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    }
+  }
+}

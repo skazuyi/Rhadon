@@ -1,0 +1,36 @@
+# 依赖
+node_modules/
+package-lock.json
+
+# 构建产物
+dist/
+new1/
+build/
+out/
+*.exe
+win-unpacked/
+
+# 日志
+*.log
+npm-debug.log*
+
+# 编辑器 / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# 备份文件
+*.bak
+*.bak-*
+*.old
+*.tmp
+
+# 个人配置文件（含本机路径，不应提交）
+.npmrc

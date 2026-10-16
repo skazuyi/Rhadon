@@ -1,0 +1,3893 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>个人工作台</title>
+<style>
+/* ============ 全局变量与重置 ============ */
+:root {
+  --bg-color: #1e1e2e;
+  --desktop-bg: #1e1e2e;
+  --taskbar-bg: rgba(20, 20, 30, 0.92);
+  --window-bg: rgba(40, 42, 58, 0.97);
+  --window-titlebar: rgba(55, 58, 78, 0.98);
+  --accent: #7aa2f7;
+  --text: #d8dee9;
+  --text-dim: #8a8f9e;
+  --border: rgba(255,255,255,0.12);
+  --font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-size: 15px;
+  --shadow: 0 8px 28px rgba(0,0,0,0.5);
+
+  /* ============ 动效语言（统一曲线，一处调速） ============
+   * --motion-scale：全局时长倍率。设 0 可整体关闭动效。
+   * 弹性曲线只用于小控件与窗口进出场；长距离位移一律用平滑曲线。
+   */
+  --motion-scale: 1;
+  --dur-1: calc(120ms * var(--motion-scale));   /* 微交互：hover / 按下 */
+  --dur-2: calc(200ms * var(--motion-scale));   /* 常规：菜单 / 浮层 */
+  --dur-3: calc(280ms * var(--motion-scale));   /* 大件：窗口进出场 */
+  --dur-4: calc(360ms * var(--motion-scale));   /* 最大：最大化 FLIP */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);        /* 进场：快起慢收 */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);            /* 退场 */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);      /* 位移 */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* 轻回弹：仅小控件/窗口入场 */
+}
+/* 无障碍：系统要求减弱动效时全局降级为瞬时 */
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-scale: 0; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  color: var(--text);
+  background: var(--desktop-bg);
+  user-select: none;
+  -webkit-user-select: none;
+}
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input, textarea, select { font-family: inherit; font-size: inherit; color: inherit; background: transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ============ 桌面 ============ */
+#desktop {
+  position: absolute;
+  inset: 0;
+  background: var(--desktop-bg) center/cover no-repeat;
+  z-index: 0;
+}
+/* 修复：壁纸铺满整个屏幕，居中裁剪 */
+#wallpaper {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  transition: opacity 0.4s;
+}
+#desktop-icons {
+  position: absolute;
+  left: 14px;
+  top: 58px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  z-index: 2;
+}
+.desktop-icon {
+  width: 86px;
+  padding: 10px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: center;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+.desktop-icon:hover {
+  background: rgba(255,255,255,0.12);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+}
+.desktop-icon:active { transform: translateY(-1px) scale(0.95); }
+/* 选中态：改用 class，不再污染内联 outline */
+.desktop-icon.selected {
+  background: rgba(122,162,247,0.22);
+  box-shadow: inset 0 0 0 1px var(--accent), 0 6px 16px rgba(0,0,0,0.3);
+}
+/* 双击启动：图标脉冲，与窗口弹出形成因果链 */
+.desktop-icon.launching { animation: iconPulse var(--dur-3) var(--ease-spring); }
+@keyframes iconPulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(0.88); }
+  100% { transform: scale(1); }
+}
+.desktop-icon .icon {
+  font-size: 34px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+  transition: transform var(--dur-2) var(--ease-spring);
+}
+.desktop-icon:hover .icon { transform: scale(1.08); }
+.desktop-icon .label {
+  font-size: 12px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  background: rgba(0,0,0,0.35);
+  padding: 2px 6px;
+  border-radius: 4px;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============ 任务栏（上方） ============ */
+#taskbar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 48px;
+  background: var(--taskbar-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 6px;
+  z-index: 1000;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+}
+.taskbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  color: var(--text);
+  min-width: 40px;
+  justify-content: center;
+  position: relative;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+.taskbar-btn:hover { background: rgba(255,255,255,0.12); }
+.taskbar-btn:active { transform: scale(0.94); }
+.taskbar-btn.active { background: rgba(122,162,247,0.3); }
+/* 活动指示条：任务栏按钮下方的小横条，聚焦/最小化状态各不同 */
+.taskbar-btn::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  height: 2px;
+  width: 0;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  transition: width var(--dur-2) var(--ease-out), opacity var(--dur-2) var(--ease-out);
+  opacity: 0;
+}
+.taskbar-btn.active::after { width: 60%; opacity: 1; }
+.taskbar-btn.minimized::after { width: 22%; opacity: 0.5; }
+/* 任务栏窗口按钮进场（仅新增的按钮播放） */
+.taskbar-btn.tb-enter { animation: tbIn var(--dur-2) var(--ease-out) backwards; }
+@keyframes tbIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.9); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.taskbar-btn .ico { font-size: 17px; }
+.taskbar-btn .tb-label { font-size: 13px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#taskbar-window-btns { display: flex; align-items: center; gap: 4px; flex: 1; margin: 0 8px; overflow-x: auto; overflow-y: hidden; height: 100%; }
+#taskbar-window-btns::-webkit-scrollbar { height: 0; }
+#taskbar-right { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+#taskbar-clock { text-align: right; padding: 0 10px; line-height: 1.25; }
+#taskbar-clock .t-time { font-size: 14px; font-weight: 600; }
+#taskbar-clock .t-date { font-size: 11px; color: var(--text-dim); }
+
+/* ============ 音乐浮窗 ============ */
+#music-pop {
+  position: absolute;
+  top: 56px; right: 10px;
+  width: 300px;
+  background: var(--window-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+  z-index: 1100;
+  /* 用 opacity+transform 代替 display 硬切，做出"从任务栏掉落"的方向感 */
+  display: block;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-14px) scale(0.96);
+  transform-origin: top right;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring),
+    visibility 0s linear var(--dur-2);
+}
+#music-pop.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring),
+    visibility 0s;
+}
+#music-pop .mp-cover {
+  width: 100%; height: 150px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: linear-gradient(135deg,#3a3d55,#565a7a);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 42px; color: #fff;
+  background-size: cover;
+  background-position: center;
+}
+#music-pop .mp-title { margin-top: 12px; font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#music-pop .mp-artist { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+#music-pop .mp-progress { margin-top: 12px; }
+#music-pop .mp-times { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+#music-pop .mp-controls { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 14px; }
+#music-pop .mp-controls button { font-size: 22px; padding: 6px; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; }
+#music-pop .mp-controls button:hover { background: rgba(255,255,255,0.12); }
+#music-pop .mp-controls .mp-play { background: var(--accent); color: #111; width: 52px; height: 52px; font-size: 24px; }
+#music-pop .mp-playlist { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; max-height: 120px; overflow-y: auto; }
+.song { padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.song:hover, .song.active { background: rgba(122,162,247,0.25); }
+#music-pop .mp-playlist .song { padding: 4px 6px; font-size: 12px; }
+
+/* ============ 窗口 ============ */
+.window {
+  position: absolute;
+  min-width: 260px;
+  min-height: 160px;
+  background: var(--window-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10;
+  /* 只过渡合成属性；box-shadow / border-color 用独立短时长，避免拖拽掉帧 */
+  transition:
+    transform var(--dur-3) var(--ease-spring),
+    opacity var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    border-radius var(--dur-2) var(--ease-out),
+    filter var(--dur-2) var(--ease-out);
+  will-change: transform, opacity;
+}
+/* 入场 / 退场（可打断：类移除即从当前状态平滑退回，不跳到起点） */
+.window.win-enter { opacity: 0; transform: scale(0.92) translateY(14px); }
+.window.win-leaving {
+  opacity: 0;
+  transform: scale(0.94) translateY(10px);
+  pointer-events: none;
+}
+/* 最小化：向任务栏方向收拢（任务栏在顶部，所以向上收） */
+.window.win-minimizing {
+  opacity: 0;
+  transform: translateY(-28px) scale(0.9);
+  pointer-events: none;
+}
+/* 最大化/还原的 FLIP：由 JS 写 transform，这里只提供过渡 */
+.window.win-flip { transition: transform var(--dur-4) var(--ease-in-out) !important; }
+/* 拖拽/缩放中：禁用过渡，避免跟手时产生滞后拖尾 */
+.window.win-dragging { transition: none !important; }
+/* 拖拽时提升阴影，产生"被拿起"的层次感 */
+.window.win-dragging { box-shadow: 0 22px 56px rgba(0,0,0,0.66); }
+.window.maximized { border-radius: 0; }
+.window.focused {
+  border-color: rgba(122,162,247,0.6);
+  box-shadow: 0 14px 42px rgba(0,0,0,0.6), 0 0 0 1px rgba(122,162,247,0.18);
+}
+/* 未聚焦窗口轻微降饱和/降亮度，强化层次（不改变交互） */
+.window:not(.focused) { filter: saturate(0.92) brightness(0.96); }
+.window .titlebar {
+  height: 38px;
+  background: var(--window-titlebar);
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  cursor: move;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.window .titlebar .win-title-wrap { flex: 1; display: flex; align-items: center; overflow: hidden; }
+.window .titlebar .win-icon { margin-right: 8px; font-size: 15px; flex-shrink: 0; }
+.window .titlebar .win-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.window .titlebar .win-controls { display: flex; height: 100%; flex-shrink: 0; }
+.window .titlebar .win-controls button { width: 44px; height: 100%; font-size: 13px; color: var(--text); }
+.window .titlebar .win-controls button:hover { background: rgba(255,255,255,0.14); }
+.window .titlebar .win-controls .btn-close:hover { background: #e81123; color: #fff; }
+.window .win-body { flex: 1; overflow: auto; padding: 12px; position: relative; }
+.window .resize-handle { position: absolute; width: 12px; height: 12px; }
+.window .rh-se { right: 0; bottom: 0; cursor: nwse-resize; }
+.window .rh-sw { left: 0; bottom: 0; cursor: nesw-resize; }
+.window .rh-ne { right: 0; top: 38px; cursor: nesw-resize; }
+.window .rh-nw { left: 0; top: 38px; cursor: nwse-resize; }
+
+/* ============ 通用控件 ============ */
+.btn {
+  padding: 7px 14px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  transition: background 0.15s;
+}
+.btn:hover { background: rgba(255,255,255,0.16); }
+.btn.primary { background: var(--accent); color: #111; font-weight: 600; }
+.btn.primary:hover { background: #8fb0fa; }
+.btn.danger:hover { background: #e81123; color: #fff; }
+.btn.sm { padding: 4px 9px; font-size: 12px; }
+.input, textarea.input, select.input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(0,0,0,0.25);
+}
+textarea.input { resize: vertical; min-height: 60px; }
+input[type="range"] { accent-color: var(--accent); width: 100%; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 5px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* 便签 */
+.note-card {
+  background: #2b2d3e;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.note-card .note-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.note-card .note-tags input { background: rgba(255,255,255,0.1); border: none; border-radius: 6px; padding: 3px 8px; font-size: 11px; }
+.note-card .note-text { width: 100%; min-height: 44px; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; padding: 6px; font-size: 13px; }
+.note-card .note-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.tag-badge { background: rgba(122,162,247,0.25); color: #a3c0ff; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+
+/* 计时器 / 闹钟 */
+.big-time { font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 2px; padding: 16px 0; font-variant-numeric: tabular-nums; }
+.round-btns { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+.alarm-item { display: flex; align-items: center; justify-content: space-between; padding: 8px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.alarm-item .al-time { font-size: 20px; font-weight: 600; }
+.alarm-item .al-label { font-size: 12px; color: var(--text-dim); }
+.switch { position: relative; width: 42px; height: 22px; background: rgba(255,255,255,0.15); border-radius: 12px; cursor: pointer; transition: 0.2s; }
+.switch.on { background: var(--accent); }
+.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: 0.2s; }
+.switch.on::after { left: 23px; }
+
+/* 资料区 */
+.file-toolbar { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.file-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex: 1; min-height: 100px; }
+.file-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.file-item:hover { background: rgba(122,162,247,0.15); }
+.file-item .f-icon { font-size: 18px; flex-shrink: 0; width: 22px; text-align: center; }
+.file-item .f-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-item .f-info { font-size: 11px; color: var(--text-dim); }
+/* 资料区网格视图 */
+.file-grid { border: 1px solid var(--border); border-radius: 8px; flex: 1; min-height: 120px; max-height: 260px; overflow-y: auto; padding: 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; align-content: start; }
+.file-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; text-align: center; background: rgba(255,255,255,0.03); }
+.file-tile:hover { background: rgba(122,162,247,0.18); border-color: rgba(122,162,247,0.5); }
+.file-tile .f-icon { font-size: 30px; line-height: 1; }
+.file-tile .f-name { font-size: 12px; word-break: break-all; max-height: 2.4em; overflow: hidden; }
+.file-tile .f-info { font-size: 10px; color: var(--text-dim); }
+.preview-pane { margin-top: 10px; border: 1px dashed var(--border); border-radius: 8px; min-height: 120px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 10px; overflow: auto; }
+.preview-pane img, .preview-pane video { max-width: 100%; max-height: 300px; border-radius: 6px; }
+.preview-pane pre { width: 100%; white-space: pre-wrap; font-size: 12px; font-family: Consolas, monospace; color: var(--text); user-select: text; -webkit-user-select: text; overflow: auto; max-height: 300px; }
+
+/* 桌面右键菜单 & 通用浮层 */
+#context-menu {
+  position: absolute;
+  background: rgba(30,32,48,0.98);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 5px;
+  min-width: 170px;
+  z-index: 2000;
+  display: block;
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.94) translateY(-6px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring),
+    visibility 0s linear var(--dur-2);
+}
+#context-menu.show {
+  opacity: 1;
+  visibility: visible;
+  transform: scale(1) translateY(0);
+  pointer-events: auto;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring),
+    visibility 0s;
+}
+#context-menu .cm-item {
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+#context-menu .cm-item:hover { background: rgba(122,162,247,0.25); transform: translateX(2px); }
+#context-menu .cm-sep { height: 1px; background: var(--border); margin: 5px 8px; }
+
+#toast {
+  position: absolute;
+  bottom: 60px; left: 50%;
+  background: rgba(20,22,32,0.95);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 18px;
+  box-shadow: var(--shadow);
+  z-index: 3000;
+  display: block;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(14px) scale(0.96);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring),
+    visibility 0s linear var(--dur-2),   /* 等淡出播完再隐藏 */
+    width 0s linear var(--dur-2),
+    height 0s linear var(--dur-2);
+  max-width: 70%;
+}
+#toast.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0) scale(1);
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring),
+    visibility 0s;
+}
+
+/* 便签窗（贴在桌面任意位置的迷你窗） */
+.note-win {
+  position: absolute;
+  width: 230px;
+  min-height: 150px;
+  background: rgba(255,220,130,0.96);
+  color: #333;
+  border-radius: 10px;
+  box-shadow: 4px 4px 16px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  overflow: hidden;
+}
+.note-win.note-taskbar { display: none; }
+/* 便签：卡片式进出场，hover 轻微抬起 */
+.note-win {
+  transition:
+    transform var(--dur-2) var(--ease-spring),
+    box-shadow var(--dur-2) var(--ease-out),
+    opacity var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
+}
+.note-win:hover {
+  box-shadow: 8px 10px 26px rgba(0,0,0,0.5);
+  transform: translateY(-2px);
+}
+.note-win.note-entering { opacity: 0; transform: scale(0.9) translateY(10px); }
+.note-win.note-leaving { opacity: 0; transform: scale(0.92) translateY(8px); pointer-events: none; }
+.note-win .note-win-head { padding: 6px 10px; cursor: move; display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,0.08); }
+.note-win .note-win-head .tag-input { flex: 1; background: rgba(255,255,255,0.5); border: none; border-radius: 6px; padding: 2px 6px; font-size: 11px; }
+.note-win .note-win-head .pin { cursor: pointer; }
+.note-win .note-win-body textarea { width: 100%; min-height: 90px; background: transparent; border: none; outline: none; padding: 8px 10px; font-size: 13px; resize: none; color: #333; }
+.note-win .note-win-foot { display: flex; justify-content: flex-end; padding: 4px; gap: 4px; background: rgba(0,0,0,0.05); }
+
+/* ============ 计算器 ============ */
+.calc-wrap { display: flex; height: 100%; gap: 8px; }
+.calc-main { flex: 1; display: flex; flex-direction: column; }
+.calc-display {
+  background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; text-align: right; font-size: 26px; font-weight: 600;
+  min-height: 52px; display: flex; align-items: center; justify-content: flex-end;
+  overflow: hidden; white-space: nowrap; margin-bottom: 8px; font-variant-numeric: tabular-nums;
+}
+.calc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 1; }
+.calc-grid button { padding: 12px 0; font-size: 18px; border-radius: 7px; background: rgba(255,255,255,0.08); }
+.calc-grid button:hover { background: rgba(255,255,255,0.16); }
+.calc-grid button.op { background: rgba(122,162,247,0.28); color: #fff; }
+.calc-grid button.eq { background: var(--accent); color: #111; font-weight: 700; grid-row: span 2; }
+.calc-history { width: 150px; border-left: 1px solid var(--border); padding-left: 8px; overflow-y: auto; }
+.calc-history .title { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.calc-history .h-item { font-size: 12px; padding: 4px 6px; border-radius: 5px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calc-history .h-item:hover { background: rgba(122,162,247,0.25); }
+
+/* ============ 剪贴板历史 ============ */
+.clip-wrap { display: flex; flex-direction: column; height: 100%; }
+.clip-toolbar { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
+.clip-toolbar .hint { font-size: 12px; color: var(--text-dim); flex: 1; }
+.clip-list { flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.clip-item { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer; display: flex; gap: 8px; align-items: flex-start; }
+.clip-item:hover { background: rgba(122,162,247,0.15); }
+.clip-item .clip-body { flex: 1; min-width: 0; }
+.clip-item .clip-text { font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 60px; overflow: hidden; }
+.clip-item .clip-thumb { max-width: 80px; max-height: 60px; border-radius: 4px; }
+.clip-item .clip-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.clip-item .clip-actions { display: flex; flex-direction: column; gap: 4px; }
+.clip-item .clip-actions button { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.1); }
+.clip-item .clip-actions button:hover { background: rgba(255,255,255,0.2); }
+
+/* ============ 文件传输 ============ */
+.transfer-wrap { display: flex; flex-direction: column; height: 100%; }
+.transfer-status { background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; font-size: 13px; line-height: 1.7; }
+.transfer-status .addr { font-size: 18px; font-weight: 700; color: #8fd3ff; }
+.transfer-progress { margin-top: 8px; }
+.transfer-progress .bar { height: 8px; background: rgba(255,255,255,0.12); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+.transfer-progress .fill { height: 100%; width: 0; background: #22c55e; transition: width 0.5s; }
+.transfer-warn { font-size: 12px; color: #ffb3a0; margin-top: 6px; }
+
+/* ============ 便签列表（管理窗口） ============ */
+.note-list-item { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+.note-list-item:hover { background: rgba(122,162,247,0.12); }
+.note-list-item .nl-tag { background: rgba(122,162,247,0.25); color: #a3c0ff; border-radius: 8px; padding: 1px 8px; font-size: 11px; white-space: nowrap; }
+.note-list-item .nl-text { flex: 1; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 50px; overflow: hidden; }
+.note-list-item .nl-actions { display: flex; flex-direction: column; gap: 4px; }
+.note-list-item .nl-actions button { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.1); }
+.note-list-item .nl-actions button:hover { background: rgba(255,255,255,0.2); }
+.note-list-item.note-delete-hover { outline: 2px solid #e81123; background: rgba(232,17,35,0.12); }
+
+/* ============ 列表进场（阶梯式淡入，由 JS 设置 --i 序号） ============ */
+/* 只对可见的前若干项生效，避免长列表产生大量并行动画 */
+.stagger-in {
+  animation: staggerUp var(--dur-2) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 26ms * var(--motion-scale));
+}
+@keyframes staggerUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.note-list-item, .clip-item, .file-item, .file-tile, .alarm-item, .song {
+  transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.clip-item:active, .file-item:active, .file-tile:active { transform: scale(0.99); }
+
+/* ============ 通用控件微动效 ============ */
+.btn { transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out); }
+.btn:active { transform: scale(0.96); }
+.btn.primary:hover { box-shadow: 0 4px 14px rgba(122,162,247,0.4); }
+.window .titlebar .win-controls button { transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+.input, select.input, textarea.input { transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out); }
+.input:focus, select.input:focus, textarea.input:focus {
+  outline: none;
+  border-color: rgba(122,162,247,0.7);
+  box-shadow: 0 0 0 3px rgba(122,162,247,0.16);
+}
+.calc-grid button { transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out); }
+.calc-grid button:active { transform: scale(0.94); }
+.file-tile:hover { transform: translateY(-2px); }
+.song:active { transform: scale(0.99); }
+</style>
+</head>
+<body>
+<!-- 桌面 -->
+<div id="desktop">
+  <div id="wallpaper"></div>
+  <div id="desktop-icons"></div>
+</div>
+
+<!-- 任务栏（上方） -->
+<div id="taskbar">
+  <button class="taskbar-btn" id="btn-show-desktop" title="显示桌面">
+    <span class="ico">🖥️</span>
+  </button>
+  <div id="taskbar-window-btns"></div>
+  <div id="taskbar-right">
+    <button class="taskbar-btn" id="btn-keepalive" title="后台模式" style="display:none;">
+      <span class="ico">⚡</span>
+    </button>
+    <button class="taskbar-btn" id="btn-music-pop" title="音乐">
+      <span class="ico">🎵</span>
+    </button>
+    <div id="taskbar-clock">
+      <div class="t-time">--:--</div>
+      <div class="t-date">----/--/--</div>
+    </div>
+  </div>
+</div>
+
+<!-- 音乐浮窗 -->
+<div id="music-pop">
+  <div class="mp-cover" id="mp-cover">🎵</div>
+  <div class="mp-title" id="mp-title">未播放</div>
+  <div class="mp-artist" id="mp-artist">选择歌曲开始播放</div>
+  <div class="mp-progress"><input type="range" id="mp-seek" min="0" max="100" value="0"></div>
+  <div class="mp-times"><span id="mp-cur">0:00</span><span id="mp-dur">0:00</span></div>
+  <div class="mp-controls">
+    <button id="mp-prev" title="上一首">⏮️</button>
+    <button id="mp-play" class="mp-play" title="播放/暂停">▶️</button>
+    <button id="mp-next" title="下一首">⏭️</button>
+  </div>
+  <div class="mp-playlist" id="mp-playlist"></div>
+</div>
+
+<!-- 桌面右键菜单 -->
+<div id="context-menu"></div>
+
+<!-- 提示 -->
+<div id="toast"></div>
+
+<!-- 隐藏的文件输入（浏览按钮统一入口） -->
+<input type="file" id="folder-picker" webkitdirectory multiple style="display:none">
+<input type="file" id="music-folder-picker" webkitdirectory multiple style="display:none">
+<input type="file" id="wallpaper-picker" accept="image/*" style="display:none">
+<input type="file" id="snapshot-import" accept=".json" style="display:none">
+
+<script>
+/* ============================================================
+ * 个人工作台 - 核心引擎（修复版）
+ * 纯原生 JS，数据驱动，单 HTML 文件
+ * 兼容两种运行方式：
+ *   A. 浏览器（file:// 或 http://）— 用浏览按钮 + File API
+ *   B. Electron — 额外获得读目录/系统打开文件能力
+ * 保存策略：仅手动保存（Ctrl+S / 按钮），无自动保存
+ * ============================================================ */
+'use strict';
+
+/* ---------- 运行环境检测 ---------- */
+const IS_ELECTRON = !!(window.electronAPI && window.electronAPI.isElectron);
+
+/* ---------- 全局容器引用 ---------- */
+const $ = (sel, root) => (root || document).querySelector(sel);
+const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+const desktopEl = $('#desktop');
+const wallpaperEl = $('#wallpaper');
+const desktopIconsEl = $('#desktop-icons');
+const taskbarBtnsEl = $('#taskbar-window-btns');
+const musicPopEl = $('#music-pop');
+const toastEl = $('#toast');
+
+/* ---------- 工具函数 ---------- */
+function toast(msg, ms) {
+  // 内容变化时重播入场动画：先移除类并回流，否则同一 class 不会重播
+  const changed = toastEl.textContent !== msg;
+  toastEl.textContent = msg;
+  if (changed) {
+    toastEl.classList.remove('show');
+    Motion.reflow(toastEl);
+  }
+  toastEl.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => toastEl.classList.remove('show'), ms || 2200);
+}
+function uuid() {
+  return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+function fmtTime(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+function fileIcon(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const map = {
+    'jpg': '🖼️','jpeg': '🖼️','png': '🖼️','gif': '🖼️','webp': '🖼️','svg': '🖼️','bmp': '🖼️','ico': '🖼️',
+    'mp3': '🎵','wav': '🎵','ogg': '🎵','m4a': '🎵','flac': '🎵','aac': '🎵',
+    'mp4': '🎬','webm': '🎬','mov': '🎬','avi': '🎬','mkv': '🎬',
+    'pdf': '📕','txt': '📄','md': '📝','json': '📋','html': '🌐','htm': '🌐','css': '🎨','js': '⚙️','ts': '⚙️',
+    'csv': '📊','xls': '📊','xlsx': '📊','doc': '📘','docx': '📘','ppt': '📙','pptx': '📙',
+    'zip': '🗜️','rar': '🗜️','7z': '🗜️'
+  };
+  return map[ext] || '📄';
+}
+
+/* ---------- 数据存储（localStorage 封装） ---------- */
+const Store = {
+  KEY: 'workbench.state.v1',
+  defaultState() {
+    return {
+      version: 1,
+      settings: {
+        wallpaper: null,          // dataURL（浏览器）或文件路径（Electron）
+        fontFamily: 'default',
+        fontSize: 15,
+        soundEnabled: true
+,
+          clipPath: '',             // 剪贴板缓存目录（空=不可用）
+          transferPath: '',         // 传输保存目录（空=不可用）
+          transferShareDir: '',     // 电脑共享给手机的目录（空=复用传输保存目录）
+          transferPort: 8888,       // 传输端口
+          actionsDir: "",          // 快捷操作JSON目录（空=默认）
+          actionsJsDir: "",         // 自定义action JS目录
+          disabledServices: []      // 被用户关闭的后台服务 id（新服务默认启用）
+      },
+      windows: [],                // 窗口位置/大小/最小化状态
+      apps: {},                   // 各应用业务状态
+      notes: [],                  // 便签数据
+      alarms: [],                 // 闹钟
+      playlists: {},              // 播放列表
+      desktopIcons: [],           // 桌面图标顺序
+      fileArea: []                // 资料区登记的文件记录
+    };
+  },
+  load() {
+    try {
+      const raw = localStorage.getItem(this.KEY);
+      if (!raw) return this.defaultState();
+      const s = JSON.parse(raw);
+      return Object.assign(this.defaultState(), s);
+    } catch (e) { console.warn('读取本地状态失败，已使用默认值', e); return this.defaultState(); }
+  },
+  save() {
+    try { localStorage.setItem(this.KEY, JSON.stringify(State)); }
+    catch (e) { console.error('保存失败', e); toast('保存失败：' + e.message, 3000); }
+  }
+};
+
+/* ---------- 全局状态 ---------- */
+const State = Store.load();
+
+/* ---------- 手动保存（移除自动保存：此函数为空操作） ---------- */
+function scheduleAutoSave() { /* 自动保存已移除，仅保留手动 Ctrl+S / 按钮 */ }
+
+/* ============================================================
+ * 动效运行时（Motion）
+ * 设计要点：
+ *   1. 全部基于 class 驱动 CSS 过渡 —— 天然"可打断"：
+ *      中途移除 class 时，浏览器会从当前计算值平滑退回，不跳帧。
+ *   2. 时长从 CSS 变量读取，保证 JS 与 CSS 共用同一套时间轴。
+ *   3. 尊重 prefers-reduced-motion，并缓存媒体查询对象。
+ * ============================================================ */
+const Motion = {
+  _mql: window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null,
+  get reduced() { return !!(this._mql && this._mql.matches); },
+
+  /* 读取 CSS 中定义的时长（毫秒），带兜底。
+   * 注意：getPropertyValue 对自定义属性返回的是"未求值"的原始 token
+   * （例如字符串 "calc(280ms * 1)"），直接 parseFloat 会得到 NaN。
+   * 所以这里挂一个探针元素，让浏览器把 var() 真正算成可用值再读回来。 */
+  _probe: null,
+  ms(name, fallback) {
+    if (this.reduced) return 0;
+    try {
+      if (!this._probe) {
+        const p = document.createElement('div');
+        p.style.cssText = 'position:absolute;width:0;height:0;visibility:hidden;pointer-events:none;';
+        (document.body || document.documentElement).appendChild(p);
+        this._probe = p;
+      }
+      this._probe.style.transitionDuration = 'var(' + name + ')';
+      const v = getComputedStyle(this._probe).transitionDuration.trim();
+      if (v.endsWith('ms')) return parseFloat(v) || 0;
+      if (v.endsWith('s')) return (parseFloat(v) || 0) * 1000;
+    } catch (e) { /* 忽略，走兜底 */ }
+    return fallback;
+  },
+
+  /* 强制回流，确保起始类先生效，过渡才会播放 */
+  reflow(el) { void el.offsetWidth; },
+
+  /* 入场：先加起始类，回流后移除，平滑过渡到自然状态。
+   * 若在过渡中被 leave() 打断，浏览器自然从当前位置继续。
+   * 用双 rAF 触发过渡；并用定时器兜底清除起始类，
+   * 因为窗口不可见（最小化/被遮挡）时 rAF 可能不触发。 */
+  enter(el, fromClass, durVar, fallback) {
+    if (!el || this.reduced) return;
+    this.clearFlip(el);
+    el.classList.remove('win-leaving', 'note-leaving');
+    el.classList.add(fromClass);
+    this.reflow(el);
+    const clear = () => el.classList.remove(fromClass);
+    requestAnimationFrame(() => {
+      clear();
+      requestAnimationFrame(clear);
+    });
+    // 兜底：即使 rAF 完全不触发，也要在预期时长后清掉起始类
+    setTimeout(clear, this.ms(durVar, fallback) + 120);
+  },
+
+  /* 中止进行中的 FLIP，避免与进场/退场互相覆盖 transform */
+  clearFlip(el) {
+    if (!el) return;
+    if (el.__flipTimer) { clearTimeout(el.__flipTimer); el.__flipTimer = null; }
+    el.classList.remove('win-flip');
+  },
+
+  /* 退场：加退场类，动画结束后回调（用于真正移除 DOM）。
+   * 可打断：期间若元素被重新显示，调用 cancelLeave 即可取消移除。 */
+  leave(el, leaveClass, durVar, fallback, done) {
+    if (!el) { done && done(); return; }
+    if (this.reduced) { done && done(); return; }
+    this.cancelLeave(el);
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      el.__leaveDone = null;
+      el.__leaveTimer = null;
+      done && done();
+    };
+    el.__leaveDone = finish;   // 供 cancelLeave 判定
+    el.classList.add(leaveClass);
+    el.__leaveTimer = setTimeout(finish, this.ms(durVar, fallback) + 40);
+  },
+
+  /* 取消尚未执行的退场（元素被重新显示时调用），并回到正常状态 */
+  cancelLeave(el) {
+    if (!el) return;
+    if (el.__leaveTimer) { clearTimeout(el.__leaveTimer); el.__leaveTimer = null; }
+    el.__leaveDone = null;
+    el.classList.remove('win-leaving', 'note-leaving', 'win-minimizing');
+  },
+  /* FLIP：让元素从 firstRect 平滑过渡到它当前的布局位置。
+   * 用法：记录 rect -> 改样式 -> flip(el, rect)
+   * 注意：若元素还带着入场类（win-enter 也设置了 transform），
+   * 必须先摘掉它，否则两个来源的 transform 会互相打架。 */
+  flip(el, firstRect, durVar, fallback) {
+    if (!el || this.reduced || !firstRect) return;
+    // 清掉可能仍在生效的入场/退场类，避免 transform 来源冲突
+    el.classList.remove('win-enter', 'win-leaving', 'win-minimizing');
+    // 同样用布局盒（不含 transform）来算增量，保证与 firstRect 同坐标系
+    const last = {
+      left: el.offsetLeft,
+      top: el.offsetTop,
+      width: el.offsetWidth,
+      height: el.offsetHeight
+    };
+    const dx = firstRect.left - last.left;
+    const dy = firstRect.top - last.top;
+    const sx = firstRect.width / (last.width || 1);
+    const sy = firstRect.height / (last.height || 1);
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
+    if (el.__flipTimer) { clearTimeout(el.__flipTimer); el.__flipTimer = null; }
+    el.classList.remove('win-flip');
+    el.style.transformOrigin = 'top left';
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+    this.reflow(el);
+    el.classList.add('win-flip');
+    const settle = () => {
+      el.classList.remove('win-flip');
+      el.style.transformOrigin = '';
+      el.style.transform = '';
+      el.__flipTimer = null;
+    };
+    // 双 rAF 启动过渡；再用定时器兜底收尾（窗口不可见时 rAF 可能不触发）
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.transform = ''; }));
+    el.__flipTimer = setTimeout(settle, this.ms(durVar, fallback) + 60);
+  },
+
+  /* 为容器内的子项设置 --i 序号，激活阶梯式入场动画。
+   * 超过 max 的项不参与，避免长列表堆积大量并行动画。 */
+  stagger(container, selector, max) {
+    if (!container || this.reduced) return;
+    const limit = max || 10;
+    const items = Array.from(container.querySelectorAll(selector));
+    items.forEach((el, i) => {
+      if (i >= limit) return;
+      el.style.setProperty('--i', String(i));
+      el.classList.remove('stagger-in');
+      this.reflow(el);
+      el.classList.add('stagger-in');
+    });
+  }
+};
+
+/* ---------- 应用注册系统（插件接口） ---------- */
+const AppRegistry = {};   // id -> app descriptor
+// 内建应用 id 集合：在首次加载外部插件前锁定，防止自定义 JS 静默顶掉内建应用
+const BuiltinAppIds = new Set();
+// 插件上下文：加载自定义 JS 时记录来源文件，便于把注册错误归属到具体文件
+let _pluginSource = null;
+
+function registerApp(app) {
+  // 非法定义：进错误面板（而不是静默 console）
+  if (!app || typeof app !== 'object' || Array.isArray(app)) {
+    reportPluginError('应用注册', 'registerApp 的参数必须是对象', '传入 { id, name, icon, render } 形式的对象');
+    return;
+  }
+  if (typeof app.id !== 'string' || !app.id.trim()) {
+    reportPluginError('应用注册', 'registerApp 缺少合法的 id', '为应用添加字符串 id，例如 id: "myapp"');
+    return;
+  }
+  const id = app.id;
+  const existing = AppRegistry[id];
+  if (existing) {
+    // 插件覆盖内建应用 → 拒绝并报错
+    if (BuiltinAppIds.has(id)) {
+      reportPluginError('应用注册', '应用 id "' + id + '" 与内建应用冲突，已忽略',
+        '换一个不会冲突的 id（如 "' + id + '-custom"）');
+      return;
+    }
+    // 插件之间重复注册 → 报错（同一来源重复注册通常是重复执行，按覆盖处理但不报错太吵）
+    if (existing.__source && existing.__source !== _pluginSource) {
+      reportPluginError('应用注册', '应用 id "' + id + '" 已被 ' + existing.__source + ' 注册，本次注册被忽略',
+        '两个自定义 JS 使用了相同的 id，请改名区分');
+      return;
+    }
+  }
+  if (!app.render && typeof app.render !== 'function') {
+    reportPluginError('应用注册', '应用 "' + id + '" 缺少 render 函数',
+      '添加 render(body, meta) { ... }，否则窗口打开后是空白的');
+    return;
+  }
+  try { app.__source = _pluginSource || null; } catch (e) {}
+  AppRegistry[id] = app;
+}
+function getApp(id) { return AppRegistry[id]; }
+function listApps() { return Object.keys(AppRegistry).map(k => AppRegistry[k]); }
+
+/* 把插件注册期的问题收集到 ActionsEngine.errors（面板可见），并 console 备份 */
+function reportPluginError(type, reason, fix) {
+  const entry = { file: _pluginSource || '(未知来源)', type: type, reason: reason, fix: fix };
+  try { ActionsEngine.errors.push(entry); } catch (e) {}
+  console.error('[插件注册]', type, '·', reason, fix ? ('建议：' + fix) : '');
+}
+
+/* ---------- 窗口管理器 ---------- */
+const WindowManager = {
+  windows: {},        // id -> { el, appId, ... }
+  zTop: 100,
+  activeId: null,
+
+  create(app, opts) {
+    const appDef = getApp(app);
+    if (!appDef) { console.error('未注册应用', app); return; }
+    const winId = (opts && opts.id) || uuid();
+    // 若已存在则聚焦
+    if (this.windows[winId]) { this.focus(winId); return this.windows[winId]; }
+
+    const win = document.createElement('div');
+    win.className = 'window';
+    const defX = 120 + (Object.keys(this.windows).length % 6) * 34;
+    const defY = 90 + (Object.keys(this.windows).length % 5) * 30;
+    const saved = State.windows.find(w => w.appId === app && w.id === winId);
+    const x = (saved && saved.x) || ((opts && opts.x) != null ? opts.x : defX);
+    const y = (saved && saved.y) || ((opts && opts.y) != null ? opts.y : defY);
+    const w = (saved && saved.w) || (opts && opts.w) || (appDef.w || 520);
+    const h = (saved && saved.h) || (opts && opts.h) || (appDef.h || 420);
+
+    win.style.left = x + 'px';
+    win.style.top = y + 'px';
+    win.style.width = w + 'px';
+    win.style.height = h + 'px';
+
+    let titleHtml = `<span class="win-icon">${appDef.icon || '📦'}</span><span class="win-title">${esc(appDef.name || app)}</span>`;
+    win.innerHTML = `
+      <div class="titlebar">
+        <div class="win-title-wrap">${titleHtml}</div>
+        <div class="win-controls">
+          <button class="btn-min" title="最小化">—</button>
+          <button class="btn-max" title="最大化">□</button>
+          <button class="btn-close" title="关闭">✕</button>
+        </div>
+      </div>
+      <div class="win-body"></div>
+      <div class="resize-handle rh-se"></div>
+      <div class="resize-handle rh-sw"></div>
+      <div class="resize-handle rh-ne"></div>
+      <div class="resize-handle rh-nw"></div>
+    `;
+
+    const meta = {
+      id: winId,
+      appId: app,
+      el: win,
+      minimized: false,
+      maximized: false,
+      prevRect: null
+    };
+    this.windows[winId] = meta;
+    desktopEl.appendChild(win);
+
+    // 标题栏拖拽
+    this.bindTitlebar(win, meta);
+    // 缩放
+    this.bindResize(win, meta);
+    // 控制按钮
+    win.querySelector('.btn-min').addEventListener('click', e => { e.stopPropagation(); this.minimize(winId); });
+    win.querySelector('.btn-max').addEventListener('click', e => { e.stopPropagation(); this.toggleMax(winId); });
+    win.querySelector('.btn-close').addEventListener('click', e => { e.stopPropagation(); this.close(winId); });
+    win.addEventListener('mousedown', () => this.focus(winId));
+
+    // 拖拽/缩放期间暂停过渡，否则浏览器会对 left/top/width/height 逐帧补间，产生"拖尾"滞后感
+    win.addEventListener('mousedown', () => {
+      if (meta.maximized) return;
+      win.classList.add('win-dragging');
+    });
+    document.addEventListener('mouseup', () => {
+      if (win.classList.contains('win-dragging')) {
+        // 等一帧，避免 mouseup 与最后一帧 mousemove 的位置打架
+        requestAnimationFrame(() => win.classList.remove('win-dragging'));
+      }
+    });
+
+    // 调用应用渲染
+    if (appDef.render) {
+      const body = win.querySelector('.win-body');
+      appDef.render(body, meta, opts || {});
+    }
+    this.focus(winId);
+    this.renderTaskbar();
+    // 入场动画：从略小 + 略低处浮现（放在 renderTaskbar 之后，避免首帧抖动）
+    Motion.enter(win, 'win-enter', '--dur-3', 280);
+    return meta;
+  },
+
+  bindTitlebar(win, meta) {
+    const bar = win.querySelector('.titlebar');
+    let dragging = false, ox, oy, sx, sy;
+    bar.addEventListener('mousedown', e => {
+      if (e.target.closest('.win-controls')) return;
+      if (meta.maximized) return;
+      dragging = true;
+      ox = e.clientX; oy = e.clientY;
+      const r = win.getBoundingClientRect();
+      sx = r.left; sy = r.top;
+      this.focus(meta.id);
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      let nx = sx + e.clientX - ox;
+      let ny = sy + e.clientY - oy;
+      nx = Math.max(-win.offsetWidth + 80, Math.min(nx, window.innerWidth - 40));
+      ny = Math.max(48, Math.min(ny, window.innerHeight - 30));
+      win.style.left = nx + 'px';
+      win.style.top = ny + 'px';
+    });
+    document.addEventListener('mouseup', () => { dragging = false; });
+  },
+
+  bindResize(win, meta) {
+    $$('.resize-handle', win).forEach(handle => {
+      handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        if (meta.maximized) return;
+        const dir = handle.className.split(' ')[1]; // rh-se 等
+        const sx = e.clientX, sy = e.clientY;
+        const r = win.getBoundingClientRect();
+        const orig = { l: r.left, t: r.top, w: r.width, h: r.height };
+        const doMove = ev => {
+          let dx = ev.clientX - sx, dy = ev.clientY - sy;
+          let nw = orig.w, nh = orig.h, nl = orig.l, nt = orig.t;
+          if (dir.includes('e')) nw = orig.w + dx;
+          if (dir.includes('s')) nh = orig.h + dy;
+          if (dir.includes('w')) { nw = orig.w - dx; nl = orig.l + dx; }
+          if (dir.includes('n')) { nh = orig.h - dy; nt = orig.t + dy; }
+          if (nw < 260) { nl -= (260 - nw); nw = 260; }
+          if (nh < 160) { nt -= (160 - nh); nh = 160; }
+          win.style.width = nw + 'px';
+          win.style.height = nh + 'px';
+          win.style.left = nl + 'px';
+          win.style.top = nt + 'px';
+        };
+        const stop = () => {
+          document.removeEventListener('mousemove', doMove);
+          document.removeEventListener('mouseup', stop);
+        };
+        document.addEventListener('mousemove', doMove);
+        document.addEventListener('mouseup', stop);
+      });
+    });
+  },
+
+  focus(id) {
+    const m = this.windows[id];
+    if (!m) return;
+    this.zTop += 1;
+    m.el.style.zIndex = this.zTop;
+    this.activeId = id;
+    m.el.classList.add('focused');
+    Object.values(this.windows).forEach(o => { if (o.id !== id) o.el.classList.remove('focused'); });
+    if (m.minimized) this.restore(id);
+    this.renderTaskbar();
+  },
+
+  minimize(id) {
+    const m = this.windows[id];
+    if (!m || m.minimized) return;
+    m.minimized = true;
+    // 先播收拢动画，再隐藏；动画期间 pointer-events:none，不会误点
+    Motion.leave(m.el, 'win-minimizing', '--dur-3', 280, () => {
+      // 若动画期间被 restore 打断，cancelLeave 已清掉定时器，这里不会执行
+      if (m.minimized && m.el) m.el.style.display = 'none';
+    });
+    this.renderTaskbar();
+  },
+  restore(id) {
+    const m = this.windows[id];
+    if (!m) return;
+    const wasMinimized = m.minimized;
+    m.minimized = false;
+    // 取消可能仍在排队的"隐藏"回调
+    Motion.cancelLeave(m.el);
+    m.el.style.display = 'flex';
+    if (wasMinimized) {
+      // 从上方滑回，与最小化的收拢方向呼应
+      Motion.enter(m.el, 'win-minimizing', '--dur-3', 280);
+    }
+    this.focus(id);
+  },
+  /* 读取元素的"布局盒"（不含 transform）。
+   * 不能用 getBoundingClientRect：它返回的是经过 scale 之后的视觉盒，
+   * 而入场动画期间窗口正带着 scale(0.92)，量到的值会偏小并污染 prevRect。 */
+  layoutRect(el) {
+    return {
+      left: el.offsetLeft,
+      top: el.offsetTop,
+      width: el.offsetWidth,
+      height: el.offsetHeight
+    };
+  },
+  /* 最大化/还原：用 FLIP 让窗口"长"到全屏，而不是瞬移 */
+  toggleMax(id) {
+    const m = this.windows[id];
+    if (!m) return;
+    const el = m.el;
+    // 先停掉未完成的入场/退场，否则量到的是动画中间态
+    Motion.clearFlip(el);
+    el.classList.remove('win-enter', 'win-leaving', 'win-minimizing');
+    const first = this.layoutRect(el);
+    if (m.maximized) {
+      m.maximized = false;
+      const r = m.prevRect;
+      el.style.left = r.left + 'px';
+      el.style.top = r.top + 'px';
+      el.style.width = r.width + 'px';
+      el.style.height = r.height + 'px';
+      el.classList.remove('maximized');
+    } else {
+      m.prevRect = first;
+      m.maximized = true;
+      el.style.left = '0px';
+      el.style.top = '48px';
+      el.style.width = window.innerWidth + 'px';
+      el.style.height = (window.innerHeight - 48) + 'px';
+      el.classList.add('maximized');
+    }
+    Motion.flip(el, first, '--dur-4', 360);
+  },
+  close(id) {
+    const m = this.windows[id];
+    if (!m) return;
+    if (m.cantClose && m.cantClose()) { toast('传输进行中，无法关闭窗口'); return; }
+    // 关闭动画播放期间先从管理表摘除，避免重复点击/重复 render
+    delete this.windows[id];
+    if (this.activeId === id) this.activeId = null;
+    this.renderTaskbar();
+    const el = m.el;
+    Motion.leave(el, 'win-leaving', '--dur-3', 280, () => {
+      if (typeof m.cleanup === 'function') { try { m.cleanup(); } catch(e){} }
+      el.remove();
+    });
+  },
+  toggle(id) {
+    const m = this.windows[id];
+    if (!m) return;
+    if (m.minimized) this.restore(id);
+    else if (this.activeId === id && !m.minimized) this.minimize(id);
+    else this.focus(id);
+  },
+
+  showDesktop() {
+    Object.values(this.windows).forEach(m => {
+      if (!m.minimized) this.minimize(m.id);
+    });
+    this.activeId = null;
+    this.renderTaskbar();
+  },
+
+  renderTaskbar() {
+    const ids = Object.keys(this.windows);
+    // 增量更新：按钮集合不变时只同步状态类，避免每次 focus 都重建并重播进场动画
+    const prevIds = Array.from(taskbarBtnsEl.children).map(b => b.dataset.winId);
+    const same = prevIds.length === ids.length && ids.every((id, i) => prevIds[i] === id);
+
+    if (!same) {
+      taskbarBtnsEl.innerHTML = '';
+      ids.forEach(id => {
+        const m = this.windows[id];
+        const appDef = getApp(m.appId);
+        const btn = document.createElement('button');
+        btn.className = 'taskbar-btn';
+        btn.dataset.winId = id;
+        btn.title = (appDef && appDef.name) || m.appId;
+        btn.innerHTML = `<span class="ico">${appDef ? appDef.icon : '📦'}</span><span class="tb-label">${esc((appDef && appDef.name) || m.appId)}</span>`;
+        btn.addEventListener('click', () => this.toggle(id));
+        if (!prevIds.includes(id)) btn.classList.add('tb-enter');   // 只有新增的按钮播进场
+        taskbarBtnsEl.appendChild(btn);
+      });
+    }
+    // 状态类每次都同步（active / minimized）
+    Array.from(taskbarBtnsEl.children).forEach(btn => {
+      const id = btn.dataset.winId;
+      const m = this.windows[id];
+      if (!m) return;
+      btn.classList.toggle('active', this.activeId === id);
+      btn.classList.toggle('minimized', !!m.minimized);
+    });
+  },
+
+  closeAll() { Object.keys(this.windows).forEach(id => this.close(id)); }
+};
+
+/* ============================================================
+ * MP3 内嵌封面解析（ID3v2 APIC 帧）— 纯前端实现
+ * 支持 ID3v2.3 / v2.4 的 APIC 帧，提取图片为 dataURL
+ * ============================================================ */
+function extractID3Cover(arrayBuffer) {
+  try {
+    const bytes = new Uint8Array(arrayBuffer);
+    // 检查 "ID3" 标签头
+    if (bytes.length < 10 || bytes[0] !== 0x49 || bytes[1] !== 0x44 || bytes[2] !== 0x33) {
+      return null;
+    }
+    const ver = bytes[3];
+    if (ver !== 3 && ver !== 4) return null; // 只支持 2.3 / 2.4
+    // 标签大小：4 字节同步安全整数（每个字节最高位不用）
+    const tagSize = ((bytes[6] & 0x7f) << 21) | ((bytes[7] & 0x7f) << 14) | ((bytes[8] & 0x7f) << 7) | (bytes[9] & 0x7f);
+    const frameFlagsSize = ver === 4 ? 4 : 6; // v2.4 额外 4 字节
+    let pos = 10;
+    const end = 10 + tagSize;
+
+    while (pos + 10 <= end) {
+      // 读帧头
+      const frameId = String.fromCharCode(bytes[pos], bytes[pos+1], bytes[pos+2], bytes[pos+3]);
+      if (!/^[A-Z0-9]{4}$/.test(frameId)) break;
+      let frameSize;
+      if (ver === 4) {
+        // v2.4 大小也是同步安全整数
+        frameSize = ((bytes[pos+4] & 0x7f) << 21) | ((bytes[pos+5] & 0x7f) << 14) | ((bytes[pos+6] & 0x7f) << 7) | (bytes[pos+7] & 0x7f);
+        pos += 10;
+      } else {
+        // v2.3 大小是普通 4 字节大端
+        frameSize = (bytes[pos+4] << 24) | (bytes[pos+5] << 16) | (bytes[pos+6] << 8) | bytes[pos+7];
+        pos += 10;
+      }
+      if (frameSize <= 0 || pos + frameSize > end) break;
+
+      if (frameId === 'APIC') {
+        // APIC 帧：编码(1) + MIME(以0结尾) + 图片类型(1) + 描述(以0结尾) + 图片数据
+        const enc = bytes[pos];
+        let p = pos + 1;
+        const mimeStart = p;
+        while (p < pos + frameSize && bytes[p] !== 0) p++;
+        const mime = String.fromCharCode.apply(null, bytes.slice(mimeStart, p));
+        p++; // 跳过 null
+        p++; // 图片类型
+        // 描述字段：按编码跳过（此处简化：多数用 0x00 单字节终止或 UTF-16）
+        if (enc === 1) { p += 2; } // UTF-16 有 BOM
+        while (p < pos + frameSize && !(bytes[p] === 0 && (enc === 0 || bytes[p+1] === 0))) p++;
+        if (p < pos + frameSize) {
+          if (enc === 0) p++;            // Latin-1: 单个 0 终止
+          else p += 2;                    // UTF-16: 双字节 0
+        }
+        const imageData = bytes.slice(p, pos + frameSize);
+        if (!imageData.length) return null;
+        // 转 base64
+        let bin = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < imageData.length; i += chunk) {
+          bin += String.fromCharCode.apply(null, imageData.subarray(i, Math.min(i + chunk, imageData.length)));
+        }
+        const mimeFixed = (mime && mime.indexOf('image/') === 0) ? mime : 'image/jpeg';
+        const b64 = btoa(bin);
+        return 'data:' + mimeFixed + ';base64,' + b64;
+      }
+      pos += frameSize;
+    }
+    return null;
+  } catch (e) { console.warn('解析封面失败', e); return null; }
+}
+
+/* ============================================================
+ * 音乐播放器（全局单例，支持内嵌封面）
+ * ============================================================ */
+const MusicPlayer = {
+  playlist: [],       // 当前活动来源的列表（引用 sources[activeSource]）
+  sources: { folder: [], osu: [] },   // 按来源隔离的播放列表
+  activeSource: 'folder',
+  index: 0,
+  audio: new Audio(),
+  listBoxes: [],      // 已注册的播放列表容器（任务栏浮窗 + 桌面音乐窗口）
+
+  // 注册一个播放列表容器元素，渲染时同步更新
+  registerList(el) {
+    if (el && !this.listBoxes.includes(el)) this.listBoxes.push(el);
+  },
+
+  init() {
+    this.audio.addEventListener('timeupdate', () => this.renderProgress());
+    this.audio.addEventListener('loadedmetadata', () => this.renderProgress());
+    this.audio.addEventListener('ended', () => this.next());
+    // 关键：play/pause 必须立即刷新界面。
+    // 原来只监听 timeupdate，而 timeupdate 只在"正在播放"时触发，
+    // 一旦暂停就不再触发 → 按钮图标停留在暂停前的状态，
+    // 造成"界面显示的状态"和"真实播放状态"不一致（按 F3 时看着像行为反了）。
+    // 同时刷新进度条/按钮图标，保证界面与真实播放状态始终一致。
+    this.audio.addEventListener('play', () => this.renderProgress());
+    this.audio.addEventListener('pause', () => this.renderProgress());
+
+    $('#mp-play').addEventListener('click', () => this.toggle());
+    $('#mp-prev').addEventListener('click', () => this.prev());
+    $('#mp-next').addEventListener('click', () => this.next());
+    $('#mp-seek').addEventListener('input', e => {
+      if (this.audio.duration) {
+        this.audio.currentTime = (e.target.value / 100) * this.audio.duration;
+        this.renderProgress();
+      }
+    });
+
+    // 注册任务栏浮窗的播放列表容器
+    this.registerList($('#mp-playlist'));
+
+    // 恢复上次会话保存的播放列表（若无 URL 则跳过）归入 folder 来源
+    this.sources = { folder: [], osu: [] };
+    const saved = (State.playlists.music || []).filter(t => t && t.name);
+    this.sources.folder = saved;
+    this.playlist = this.sources.folder;
+    this.index = State.playlists.musicIndex || 0;
+    if (this.playlist.length) {
+      this.renderPlaylist();
+      // 浏览器模式下：objectURL 已失效，提醒重新选择文件夹
+      if (!IS_ELECTRON) {
+        const hasPlayable = saved.some(t => t.dataUrl || t.url);
+        if (!hasPlayable) setTimeout(() => toast('播放列表中歌曲需要重新选择文件夹加载', 3500), 1500);
+      }
+    }
+  },
+
+  addTracks(tracks, source) {
+    const s = source || this.activeSource;
+    if (!this.sources[s]) this.sources[s] = [];
+    const target = this.sources[s];
+    tracks.forEach(t => {
+      target.push({ name: t.name, url: t.url, dataUrl: t.dataUrl, path: t.path, cover: t.cover || null });
+    });
+    // 若是加入了非当前来源，则自动切换过去
+    if (source && source !== this.activeSource) { this.switchSource(source); }
+    else {
+      this.renderPlaylist();
+      if (!this.audio.src && this.sources[this.activeSource].length) this.play(this.index);
+    }
+  },
+
+  // 切换音乐来源（folder 普通文件夹 / osu osu 歌曲库），互不混合
+  switchSource(source) {
+    if (!this.sources[source]) this.sources[source] = [];
+    this.activeSource = source;
+    this.playlist = this.sources[source];
+    this.index = 0;
+    this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.renderPlaylist();
+    if (this.playlist.length) this.play(0); else this.renderNowPlaying();
+  },
+
+  resolveURL(track) {
+    if (track.dataUrl) return track.dataUrl;
+    if (track.path && IS_ELECTRON) return track.path; // Electron 下 path 可行
+    return track.url || null;
+  },
+
+  /* 统一的"开始播放"入口。
+   * 这里的捕获只做两件事：
+   *   1) 真正失败（格式不支持、找不到文件等）时明确提示，不再静默 console.warn
+   *   2) AbortError（被后续 play/pause 打断）静默忽略——那是正常竞争，不是失败
+   * 注意：不在这里维护任何"意图状态"。此前用 _wantsPlay 记录意图的做法是错的：
+   * 意图本身要靠 play/pause 事件异步同步，事件没到达时它就是过期值，
+   * 会让 toggle 的判断忽对忽错。判断只依据 audio.paused 这一个真实来源。 */
+  _startPlayback() {
+    const p = this.audio.play();
+    if (!p || typeof p.then !== 'function') { this.renderPlaylist(); this.renderProgress(); return; }
+    p.then(() => {
+      this.renderPlaylist();
+      this.renderProgress();
+    }).catch((e) => {
+      const name = (e && e.name) || '';
+      if (name === 'AbortError' || /interrupted by a call to (pause|play)/i.test((e && e.message) || '')) {
+        this.renderProgress();
+        return;
+      }
+      toast('播放失败：' + ((e && e.message) || e), 3500);
+      this.renderPlaylist();
+      this.renderProgress();
+    });
+  },
+
+  play(i) {
+    if (i != null) this.index = i;
+    if (!this.playlist.length) { toast('播放列表为空'); return; }
+    this.index = (this.index + this.playlist.length) % this.playlist.length;
+    const t = this.playlist[this.index];
+    const src = this.resolveURL(t);
+    if (!src) { toast('无法播放：' + t.name + '（仅本次会话或Electron可用）'); return; }
+    this.audio.src = src;
+    this._startPlayback();
+    this.renderPlaylist();
+    this.renderProgress();
+  },
+  /* 播放 ↔ 暂停 切换。
+   * 唯一依据是 audio.paused（浏览器给的真实播放状态），不引入额外状态。
+   * 说明：play() 是异步的，调用后 paused 不会立刻变；但这不影响正确性——
+   * 若上一次 play() 还没完成，这一次会走 pause 分支，产生的 AbortError
+   * 已被 _startPlayback 静默忽略，最终状态仍是"暂停"，符合"切换"预期。 */
+  toggle() {
+    if (!this.audio.src) { if (this.playlist.length) this.play(this.index); return; }
+    if (this.audio.paused) {
+      this._startPlayback();
+    } else {
+      this.audio.pause();
+    }
+    this.renderPlaylist();
+    // 必须刷新进度条/按钮图标：renderPlaylist 不会更新按钮，图标只在 renderProgress 里改。
+    this.renderProgress();
+  },
+  next() { if (this.playlist.length) this.play(this.index + 1); },
+  prev() { if (this.playlist.length) this.play(this.index - 1); },
+
+  renderPlaylist() {
+    const emptyHtml = '<div style="font-size:12px;color:var(--text-dim);padding:4px;">播放列表为空，点“音乐”应用添加歌曲/文件夹</div>';
+    this.listBoxes.forEach(box => {
+      if (!box) return;
+      box.innerHTML = this.playlist.length ? '' : emptyHtml;
+      this.playlist.forEach((t, i) => {
+        const item = document.createElement('div');
+        item.className = 'song' + (i === this.index ? ' active' : '');
+        item.textContent = t.name;
+        item.title = t.name;
+        item.addEventListener('click', () => this.play(i));
+        box.appendChild(item);
+      });
+      Motion.stagger(box, '.song', 8);
+    });
+    this.renderNowPlaying();
+  },
+
+  renderNowPlaying() {
+    const t = this.playlist[this.index];
+    const coverEl = $('#mp-cover');
+    if (!t) {
+      $('#mp-title').textContent = '未播放';
+      $('#mp-artist').textContent = '选择歌曲开始播放';
+      coverEl.innerHTML = '🎵';
+      coverEl.style.backgroundImage = '';
+      return;
+    }
+    $('#mp-title').textContent = t.name;
+    $('#mp-artist').textContent = '单曲';
+    if (t.cover) {
+      coverEl.innerHTML = '';
+      coverEl.style.backgroundImage = `url("${t.cover}")`;
+    } else {
+      coverEl.innerHTML = '🎵';
+      coverEl.style.backgroundImage = '';
+    }
+  },
+
+  renderProgress() {
+    const a = this.audio;
+    const pct = a.duration ? (a.currentTime / a.duration) * 100 : 0;
+    $('#mp-seek').value = pct || 0;
+    $('#mp-cur').textContent = fmtTime(a.currentTime);
+    $('#mp-dur').textContent = a.duration ? fmtTime(a.duration) : '0:00';
+    $('#mp-play').textContent = a.paused ? '▶️' : '⏸️';
+  }
+};
+// 暴露 MusicPlayer 到全局，便于 Actions 自定义 JS 调用
+window.MusicPlayer = MusicPlayer;
+
+
+/* ---------- 任务栏时钟 ---------- */
+function renderClock() {
+  const now = new Date();
+  const time = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
+  const week = ['日','一','二','三','四','五','六'][now.getDay()];
+  const date = now.getFullYear() + '/' + pad2(now.getMonth()+1) + '/' + pad2(now.getDate()) + ' 周' + week;
+  $('.t-time').textContent = time;
+  $('.t-date').textContent = date;
+}
+setInterval(renderClock, 1000);
+renderClock();
+
+/* ============================================================
+ * 桌面图标 & 右键菜单
+ * ============================================================ */
+function renderDesktopIcons() {
+  desktopIconsEl.innerHTML = '';
+  const apps = listApps().filter(a => a.showOnDesktop !== false);
+  State.desktopIcons = State.desktopIcons.length ? State.desktopIcons : apps.map(a => a.id);
+  // 按保存顺序
+  const ordered = State.desktopIcons.map(id => getApp(id)).filter(Boolean);
+  apps.forEach(a => { if (!ordered.includes(a)) ordered.push(a); });
+  ordered.forEach(appDef => {
+    const icon = document.createElement('div');
+    icon.className = 'desktop-icon';
+    icon.innerHTML = `<span class="icon">${appDef.icon || '📦'}</span><span class="label">${esc(appDef.name)}</span>`;
+    icon.addEventListener('dblclick', () => {
+      // 图标脉冲：让"启动"这个动作与窗口浮现形成因果链
+      icon.classList.remove('launching');
+      Motion.reflow(icon);
+      icon.classList.add('launching');
+      setTimeout(() => icon.classList.remove('launching'), 400);
+      if (appDef._autoExec) ActionsEngine.execute(appDef._autoExec);
+      else WindowManager.create(appDef.id);
+    });
+    icon.addEventListener('click', () => {
+      $$('.desktop-icon').forEach(i => i.classList.remove('selected'));
+      icon.classList.add('selected');
+    });
+    desktopIconsEl.appendChild(icon);
+  });
+  // 图标逐个浮现
+  Motion.stagger(desktopIconsEl, '.desktop-icon', 14);
+}
+
+function showContextMenu(x, y, items) {
+  const menu = $('#context-menu');
+  menu.innerHTML = '';
+  items.forEach(it => {
+    if (it.sep) { const d = document.createElement('div'); d.className = 'cm-sep'; menu.appendChild(d); return; }
+    const el = document.createElement('div');
+    el.className = 'cm-item';
+    el.innerHTML = `${it.icon || ''} ${esc(it.label)}`;
+    el.addEventListener('click', () => { hideContextMenu(); it.action && it.action(); });
+    menu.appendChild(el);
+  });
+  // 先显示（此时仍是透明状态）才能量到尺寸，再据点击点定位
+  menu.classList.add('show');
+  const r = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - r.width - 5);
+  const top = Math.min(y, window.innerHeight - r.height - 5);
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+  // 原点跟随点击位置，做出"从鼠标处长出"的方向感
+  const ox = Math.max(0, Math.min(x - left, r.width));
+  const oy = Math.max(0, Math.min(y - top, r.height));
+  menu.style.transformOrigin = `${ox}px ${oy}px`;
+}
+function hideContextMenu() {
+  const menu = $('#context-menu');
+  if (!menu.classList.contains('show')) return;
+  menu.classList.remove('show');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#context-menu')) hideContextMenu();
+  if (!e.target.closest('#music-pop') && !e.target.closest('#btn-music-pop') && musicPopEl.classList.contains('show')) {
+    musicPopEl.classList.remove('show');
+  }
+  if (!e.target.closest('.desktop-icon')) $$('.desktop-icon').forEach(i => i.classList.remove('selected'));
+});
+document.addEventListener('contextmenu', e => {
+  if (!e.target.closest('.window')) {
+    e.preventDefault();
+    const items = [
+      { icon: '📁 ', label: '资料区', action: () => WindowManager.create('fileArea') },
+      { icon: '🗒️ ', label: '新建便签', action: () => Notes.create() },
+      { sep: true },
+      { icon: '🖼️ ', label: '更换桌面背景', action: () => $('#wallpaper-picker').click() },
+      { icon: '⚙️ ', label: '设置', action: () => WindowManager.create('settings') },
+      { sep: true },
+      { icon: '💾 ', label: '保存快照 (Ctrl+S)', action: () => persistAll(true) },
+      { icon: '📤 ', label: '导出快照文件', action: () => exportSnapshot() },
+      { icon: '📥 ', label: '导入快照文件', action: () => $('#snapshot-import').click() }
+    ];
+    showContextMenu(e.clientX, e.clientY, items);
+  }
+});
+
+/* ============================================================
+ * 便签管理（可贴在桌面任意位置）
+ * ============================================================ */
+const Notes = {
+  els: new Map(),   // id -> { el, note }（仅桌面可见的便签）
+  managerRefresh: null,   // 便签管理窗口的刷新函数
+
+  init() {
+    (State.notes || []).forEach(n => {
+      if (!n.closed) this.create(n, true);
+    });
+  },
+
+  // 创建（或恢复）一条便签。closed=true 时只在数据里，不创建桌面便签
+  create(data, fromRestore) {
+    const note = data || { id: uuid(), text: '', tags: '', x: 120 + Math.random()*120, y: 120 + Math.random()*100, color: '#ffdc82', z: 70, closed: false };
+    if (fromRestore) {
+      if (!State.notes.includes(note)) State.notes.push(note);
+    } else {
+      State.notes.push(note);
+    }
+    // 若已关闭则不生成桌面便签
+    if (note.closed) { this.refreshManager(); return null; }
+
+    const el = document.createElement('div');
+    el.className = 'note-win';
+    el.style.left = note.x + 'px';
+    el.style.top = note.y + 'px';
+    el.style.background = note.color;
+    el.style.zIndex = note.z || 70;
+    el.innerHTML = `
+      <div class="note-win-head">
+        <span>🗒️</span>
+        <input class="tag-input" placeholder="标签" value="${esc(note.tags || '')}">
+        <button class="pin" title="切换颜色">🎨</button>
+        <button class="close-note" title="关闭（保留在便签管理）">🗕</button>
+      </div>
+      <div class="note-win-body"><textarea placeholder="写点什么...">${esc(note.text || '')}</textarea></div>
+      <div class="note-win-foot">
+        <span style="font-size:11px;opacity:.6">拖动可移动 • 点右上角可关闭（仍保留）</span>
+      </div>
+    `;
+    desktopEl.appendChild(el);
+
+    const meta = { id: note.id, el, note };
+    this.els.set(note.id, meta);
+    Motion.enter(el, 'note-entering', '--dur-2', 200);
+
+    el.querySelector('textarea').addEventListener('input', e => {
+      note.text = e.target.value; this.refreshManager();
+    });
+    el.querySelector('.tag-input').addEventListener('input', e => {
+      note.tags = e.target.value; this.refreshManager();
+    });
+    el.querySelector('.close-note').addEventListener('click', () => this.close(note.id));
+    el.querySelector('.pin').addEventListener('click', () => {
+      const colors = ['#ffdc82','#9ee6b8','#a9d3ff','#ffb3c6','#d0b3ff','#ffe29e'];
+      const cur = colors.indexOf(note.color);
+      note.color = colors[(cur+1) % colors.length];
+      el.style.background = note.color;
+      this.refreshManager();
+    });
+
+    // 拖动便签（保存监听引用以便销毁）
+    const head = el.querySelector('.note-win-head');
+    let dragging = false, ox, oy;
+    meta._onMove = e => {
+      if (!dragging) return;
+      note.x = e.clientX - ox; note.y = e.clientY - oy;
+      el.style.left = note.x + 'px'; el.style.top = note.y + 'px';
+    };
+    meta._onUp = () => { dragging = false; };
+    head.addEventListener('mousedown', e => {
+      if (e.target.closest('input,button')) return;
+      dragging = true; ox = e.clientX - note.x; oy = e.clientY - note.y;
+      this.bringToFront(note.id);
+    });
+    document.addEventListener('mousemove', meta._onMove);
+    document.addEventListener('mouseup', meta._onUp);
+    this.refreshManager();
+    return meta;
+  },
+
+  // 销毁便签 DOM 并移除全局监听（供 close/remove 调用）
+  destroyEl(meta) {
+    if (!meta) return;
+    if (meta._onMove) document.removeEventListener('mousemove', meta._onMove);
+    if (meta._onUp) document.removeEventListener('mouseup', meta._onUp);
+    meta._onMove = null; meta._onUp = null;
+    if (meta.el) { meta.el.remove(); meta.el = null; }
+    this.els.delete(meta.id);
+  },
+
+  // 关闭：从桌面移除，但保留数据（closed=true），仍显示在管理列表
+  close(id) {
+    const meta = this.els.get(id);
+    if (!meta) return;
+    meta.note.closed = true;
+    // 先播退场动画，再销毁 DOM
+    const el = meta.el;
+    if (el) Motion.leave(el, 'note-leaving', '--dur-2', 200, () => this.destroyEl(meta));
+    else this.destroyEl(meta);
+    this.refreshManager();
+    toast('便签已关闭，仍保留在便签管理中');
+  },
+
+  // 重新打开：从管理列表恢复到桌面
+  open(id) {
+    const note = State.notes.find(n => n.id === id);
+    if (!note) return;
+    note.closed = false;
+    note.x = 120 + Math.random()*120;
+    note.y = 120 + Math.random()*100;
+    this.create(note, true);
+    toast('便签已恢复到桌面');
+  },
+
+  // 彻底删除（从数据中移除）
+  remove(id) {
+    const meta = this.els.get(id);
+    if (meta) this.destroyEl(meta);
+    const idx = State.notes.findIndex(n => n.id === id);
+    if (idx > -1) State.notes.splice(idx, 1);
+    this.refreshManager();
+    toast('便签已彻底删除');
+  },
+
+  bringToFront(id) {
+    const meta = this.els.get(id);
+    if (!meta) return;
+    meta.note.z = ++WindowManager.zTop;
+    meta.el.style.zIndex = meta.note.z;
+  },
+
+  // 刷新便签管理窗口（若打开）
+  refreshManager() {
+    if (this.managerRefresh) { try { this.managerRefresh(); } catch(e){} }
+  },
+  getNote(id) { return this.els.get(id) ? this.els.get(id).note : null; }
+};
+
+/* ============================================================
+ * 内置应用定义
+ * ============================================================ */
+
+/* ---------- 时钟（桌面部件 + 任务栏） ---------- */
+registerApp({
+  id: 'clock',
+  name: '时钟',
+  icon: '🕐',
+  w: 320, h: 220,
+  render(body, meta) {
+    const draw = () => {
+      const n = new Date();
+      body.innerHTML = `
+        <div style="text-align:center;padding:14px 0;">
+          <div class="big-time" style="font-size:52px;">${pad2(n.getHours())}:${pad2(n.getMinutes())}:${pad2(n.getSeconds())}</div>
+          <div style="color:var(--text-dim);margin-top:4px;">${n.getFullYear()}年${n.getMonth()+1}月${n.getDate()}日 星期${['日','一','二','三','四','五','六'][n.getDay()]}</div>
+        </div>`;
+    };
+    draw();
+    meta._timer = setInterval(draw, 1000);
+    meta.cleanup = () => { clearInterval(meta._timer); meta._timer = null; };
+  }
+});
+
+/* ---------- 计时器（修复：用全局每秒 tick 驱动，保证稳定刷新） ---------- */
+const TimerApp = {
+  displayEl: null,
+  _timer: null,
+  refresh() {
+    const st = State.apps.timer = State.apps.timer || { running: false, remaining: 1500, total: 1500 };
+    if (this.displayEl) this.displayEl.textContent = fmtTime(st.remaining);
+    // 按需启动：正在计时且有显示目标时确保定时器运行
+    this.ensureRunning();
+  },
+  ensureRunning() {
+    const st = State.apps.timer = State.apps.timer || { running: false, remaining: 1500, total: 1500 };
+    if (st.running && !this._timer) {
+      this._timer = setInterval(() => this.tickOnce(), 1000);
+    }
+  },
+  maybeStop() {
+    const st = State.apps.timer;
+    // 没有正在计时，或没有窗口显示时，停止全局定时器以省资源
+    if (this._timer && (!st || !st.running || !this.displayEl)) {
+      clearInterval(this._timer);
+      this._timer = null;
+    }
+  },
+  tickOnce() {
+    const st = State.apps.timer = State.apps.timer || { running: false, remaining: 1500, total: 1500 };
+    if (!st.running) { this.maybeStop(); return; }
+    if (st.remaining > 0) { st.remaining--; this.refresh(); }
+    else {
+      st.running = false;
+      this.refresh();
+      if (State.settings.soundEnabled !== false) beep();
+      toast('⏱️ 计时结束！');
+    }
+  }
+};
+
+registerApp({
+  id: 'timer',
+  name: '计时器',
+  icon: '⏱️',
+  w: 360, h: 300,
+  render(body, meta) {
+    const st = State.apps.timer = State.apps.timer || { running: false, remaining: 1500, total: 1500 };
+    const disp = document.createElement('div');
+    disp.className = 'big-time';
+    body.appendChild(disp);
+    TimerApp.displayEl = disp;   // 绑定到全局刷新
+    disp.textContent = fmtTime(st.remaining);
+
+    const presetRow = document.createElement('div');
+    presetRow.className = 'row';
+    presetRow.style.justifyContent = 'center';
+    [['1分钟',60],['5分钟',300],['10分钟',600],['25分钟',1500]].forEach(([label,sec]) => {
+      const b = document.createElement('button');
+      b.className = 'btn sm';
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        st.remaining = sec; st.total = sec;
+        TimerApp.refresh();
+      });
+      presetRow.appendChild(b);
+    });
+    body.appendChild(presetRow);
+
+    const btns = document.createElement('div');
+    btns.className = 'round-btns';
+    const bStart = document.createElement('button'); bStart.className = 'btn primary'; bStart.textContent = '开始';
+    const bPause = document.createElement('button'); bPause.className = 'btn'; bPause.textContent = '暂停';
+    const bReset = document.createElement('button'); bReset.className = 'btn'; bReset.textContent = '重置';
+    btns.append(bStart, bPause, bReset);
+    body.appendChild(btns);
+
+    bStart.addEventListener('click', () => {
+      if (st.remaining <= 0) { st.remaining = st.total; }
+      st.running = true;
+      TimerApp.refresh();
+    });
+    bPause.addEventListener('click', () => {
+      st.running = false;
+      TimerApp.refresh();
+      TimerApp.maybeStop();
+    });
+    bReset.addEventListener('click', () => {
+      st.running = false;
+      st.remaining = st.total;
+      TimerApp.refresh();
+      TimerApp.maybeStop();
+    });
+    // 窗口关闭：解除显示绑定并停止全局定时器（省资源、防泄漏）
+    meta.cleanup = () => {
+      if (TimerApp.displayEl === disp) TimerApp.displayEl = null;
+      TimerApp.maybeStop();
+    };
+  }
+});
+
+/* ---------- 闹钟 ---------- */
+registerApp({
+  id: 'alarm',
+  name: '闹钟',
+  icon: '⏰',
+  w: 380, h: 380,
+  render(body, meta) {
+    State.alarms = State.alarms || [];
+    const list = document.createElement('div');
+    body.appendChild(list);
+    const form = document.createElement('div');
+    form.className = 'row';
+    form.style.marginTop = '8px';
+    const timeInput = document.createElement('input');
+    timeInput.type = 'time';
+    timeInput.className = 'input';
+    timeInput.style.width = '110px';
+    const labelInput = document.createElement('input');
+    labelInput.className = 'input';
+    labelInput.placeholder = '备注（可选）';
+    labelInput.style.flex = '1';
+    const bAdd = document.createElement('button');
+    bAdd.className = 'btn primary';
+    bAdd.textContent = '添加';
+    form.append(timeInput, labelInput, bAdd);
+    body.appendChild(form);
+
+    const draw = () => {
+      list.innerHTML = '';
+      if (!State.alarms.length) { list.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:20px;">暂无闹钟</div>'; return; }
+      State.alarms.forEach((a, i) => {
+        const item = document.createElement('div');
+        item.className = 'alarm-item';
+        const sw = document.createElement('div');
+        sw.className = 'switch' + (a.enabled ? ' on' : '');
+        sw.addEventListener('click', () => { a.enabled = !a.enabled; draw(); });
+        item.innerHTML = `
+          <div><div class="al-time">${esc(a.time)}</div><div class="al-label">${esc(a.label || '闹钟')}</div></div>`;
+        const right = document.createElement('div');
+        right.className = 'row';
+        right.appendChild(sw);
+        const del = document.createElement('button');
+        del.className = 'btn sm danger';
+        del.textContent = '删除';
+        del.addEventListener('click', () => { State.alarms.splice(i,1); draw(); });
+        right.appendChild(del);
+        item.appendChild(right);
+        list.appendChild(item);
+      });
+    };
+    bAdd.addEventListener('click', () => {
+      if (!timeInput.value) { toast('请选择时间'); return; }
+      State.alarms.push({ time: timeInput.value, label: labelInput.value, enabled: true, firedFor: null });
+      labelInput.value = '';
+      draw(); toast('闹钟已添加');
+    });
+    draw();
+  }
+});
+
+/* ---------- 音乐播放器窗口（修复：支持选择文件夹添加歌曲 + 内嵌封面） ---------- */
+registerApp({
+  id: 'music',
+  name: '音乐播放器',
+  icon: '🎵',
+  w: 460, h: 420,
+  render(body, meta) {
+    const drawSourceCtl = () => {
+      const cur = MusicPlayer.activeSource;
+      const s1 = body.querySelector('#src-folder'), s2 = body.querySelector('#src-osu');
+      if (s1) { s1.classList.toggle('primary', cur==='folder'); }
+      if (s2) { s2.classList.toggle('primary', cur==='osu'); }
+      const info = body.querySelector('#src-count');
+      if (info) info.textContent = (MusicPlayer.sources && MusicPlayer.sources[cur] ? MusicPlayer.sources[cur].length : 0) + ' 首 · ' + (cur==='folder'?'普通文件夹':'osu 歌曲库');
+    };
+    body.innerHTML = `
+      <div style="margin-bottom:8px;">
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">音乐来源</div>
+        <div class="row">
+          <button class="btn" id="src-folder">📂 普通文件夹</button>
+          <button class="btn" id="src-osu">🎮 osu 歌曲库</button>
+          <span id="src-count" style="font-size:12px;color:var(--text-dim);"></span>
+        </div>
+      </div>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn sm" id="music-folder">＋ 添加文件夹音乐</button>
+        <button class="btn sm" id="music-osu">🔄 加载 osu</button>
+        <button class="btn sm" id="music-clear">🗑 清空当前来源</button>
+      </div>
+      <div style="max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:4px;" id="music-list-box"></div>
+    `;
+    // 来源切换
+    $('#src-folder').addEventListener('click', () => { MusicPlayer.switchSource('folder'); drawSourceCtl(); });
+    $('#src-osu').addEventListener('click', () => { MusicPlayer.switchSource('osu'); drawSourceCtl(); });
+    // 添加文件夹音乐（加到 folder 来源，并切换到该来源）
+    $('#music-folder').addEventListener('click', () => { MusicPlayer.switchSource('folder'); drawSourceCtl(); addMusicFolder('folder'); });
+    // 加载 osu（切到 osu 来源再加载）
+    $('#music-osu').addEventListener('click', () => {
+      MusicPlayer.switchSource('osu'); drawSourceCtl();
+      if (typeof window.loadOsuLibrary === 'function') window.loadOsuLibrary();
+      else toast('未找到 osu 插件，请将 osu 插件 JS 放入自定义 Action 目录');
+      setTimeout(drawSourceCtl, 6000);
+    });
+    // 清空当前来源
+    $('#music-clear').addEventListener('click', () => {
+      const cur = MusicPlayer.activeSource;
+      if (MusicPlayer.sources[cur]) MusicPlayer.sources[cur] = [];
+      MusicPlayer.playlist = MusicPlayer.sources[cur];
+      MusicPlayer.index = 0; MusicPlayer.audio.pause(); MusicPlayer.audio.removeAttribute('src');
+      MusicPlayer.renderPlaylist(); toast('已清空当前来源 (' + (cur==='folder'?'普通文件夹':'osu 歌曲库') + ')');
+      drawSourceCtl();
+    });
+    // 注册桌面窗口的播放列表容器，与任务栏浮窗同步显示
+    MusicPlayer.registerList($('#music-list-box'));
+    MusicPlayer.renderPlaylist();
+    drawSourceCtl();
+  }
+});
+
+/* ---------- 从文件夹添加音频：浏览器用 webkitdirectory，Electron 用 selectDir ---------- */
+async function addMusicFolder(source) {
+  if (IS_ELECTRON) {
+    const dir = await window.electronAPI.selectDir();
+    if (!dir) return;
+    try {
+      const entries = await window.electronAPI.readDir(dir);
+      const audioExts = ['mp3','wav','ogg','m4a','flac','aac','wma'];
+      const files = entries.filter(e => !e.isDirectory && audioExts.includes(e.name.split('.').pop().toLowerCase()));
+      const tracks = [];
+      for (const f of files) {
+        const t = { name: f.name, path: f.path, url: null, dataUrl: null, cover: null };
+        // 尝试读取内嵌封面（通过 readAsDataURL 拿 base64 再解析）
+        try {
+          const res = await window.electronAPI.readAsDataURL(f.path);
+          if (res && res.dataUrl) {
+            const b64 = res.dataUrl.split(',')[1];
+            const bin = atob(b64);
+            const buf = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            t.cover = extractID3Cover(buf.buffer);
+          }
+        } catch(e) {}
+        tracks.push(t);
+      }
+      MusicPlayer.addTracks(tracks, source || 'folder');
+      toast('已从文件夹添加 ' + tracks.length + ' 首歌曲');
+    } catch (err) { toast('读取失败：' + err); }
+  } else {
+    // 浏览器模式：webkitdirectory 选择文件夹
+    $('#music-folder-picker').click();
+  }
+}
+// 浏览器模式：folder picker 回调
+$('#music-folder-picker').addEventListener('change', async e => {
+  const files = Array.from(e.target.files).filter(f => {
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    return ['mp3','wav','ogg','m4a','flac','aac','wma'].includes(ext);
+  });
+  const tracks = [];
+  for (const f of files) {
+    const t = { name: f.name, url: URL.createObjectURL(f), dataUrl: null, path: null, cover: null };
+    try {
+      const buf = await f.slice(0, 2*1024*1024).arrayBuffer();
+      t.cover = extractID3Cover(buf);
+    } catch(err) {}
+    tracks.push(t);
+  }
+  MusicPlayer.addTracks(tracks, 'folder');
+  e.target.value = '';
+  toast('已从文件夹添加 ' + tracks.length + ' 首歌曲');
+});
+
+/* ---------- 资料区（修复：浏览选择文件夹，而非单个文件） ---------- */
+registerApp({
+  id: 'fileArea',
+  name: '资料区',
+  icon: '📁',
+  w: 640, h: 520,
+  render(body, meta) {
+    State.fileArea = State.fileArea || [];
+    body.innerHTML = `
+      <div class="file-toolbar">
+        <button class="btn" id="fa-folder">📂 选择资料文件夹</button>
+        ${IS_ELECTRON ? '<button class="btn" id="fa-clear">清除</button>' : ''}
+      </div>
+      <div class="file-grid" id="fa-list"></div>
+      <div class="preview-pane" id="fa-preview"><div style="color:var(--text-dim);">点击左侧文件预览</div></div>
+    `;
+    if (!IS_ELECTRON) { $('#fa-folder').textContent = '📂 选择资料文件夹（浏览…）'; }
+
+    const listEl = $('#fa-list');
+    const prevEl = $('#fa-preview');
+
+    const drawList = () => {
+      listEl.innerHTML = '';
+      if (!State.fileArea.length) {
+        listEl.innerHTML = '<div style="padding:14px;color:var(--text-dim);text-align:center;">资料区为空<br>点击“选择资料文件夹”载入你的工作文件</div>';
+        return;
+      }
+      State.fileArea.forEach((f, i) => {
+        const item = document.createElement('div');
+        item.className = 'file-tile';
+        item.innerHTML = `<span class="f-icon">${fileIcon(f.name)}</span><span class="f-name">${esc(f.name)}</span><span class="f-info">${f.size ? Math.round(f.size/1024)+'KB' : ''}</span>`;
+        item.addEventListener('click', () => previewFile(i));
+        item.addEventListener('dblclick', () => {
+          if (f.path && IS_ELECTRON) window.electronAPI.openPath(f.path);
+          else if (f.browserFile && f.browserFile.type === 'application/pdf') {
+            const url = URL.createObjectURL(f.browserFile);
+            window.open(url, '_blank');
+          }
+          else toast('该文件已在预览中；如需用外部程序打开请使用 Electron 运行');
+        });
+        listEl.appendChild(item);
+      });
+    };
+
+    // Electron：选择文件夹后递归读取
+    $('#fa-folder').addEventListener('click', async () => {
+      if (IS_ELECTRON) {
+        const dir = await window.electronAPI.selectDir();
+        if (!dir) return;
+        try {
+          State.fileArea = [];
+          const ents = await window.electronAPI.readDir(dir);
+          ents.filter(e => !e.isDirectory).forEach(e => {
+            State.fileArea.push({ id: uuid(), name: e.name, path: e.path, size: 0 });
+          });
+          drawList(); toast('已扫描文件夹内 ' + State.fileArea.length + ' 个文件');
+        } catch (err) { toast('读取失败：' + err); }
+      } else {
+        $('#folder-picker').click();
+      }
+    });
+    if (IS_ELECTRON) {
+      $('#fa-clear').addEventListener('click', () => { State.fileArea = []; drawList(); prevEl.innerHTML = '<div style="color:var(--text-dim);">资料区已清空</div>'; });
+    }
+
+    // 浏览器模式：webkitdirectory 选择文件夹
+    $('#folder-picker').addEventListener('change', e => {
+      State.fileArea = [];
+      Array.from(e.target.files).forEach(f => {
+        State.fileArea.push({ id: uuid(), name: f.name, size: f.size, type: f.type, path: null, browserFile: f });
+      });
+      e.target.value = '';
+      drawList(); toast('已载入文件夹 ' + State.fileArea.length + ' 个文件');
+    });
+
+    // 预览
+    async function previewFile(i) {
+      const f = State.fileArea[i];
+      prevEl.innerHTML = '<div style="color:var(--text-dim);">加载中…</div>';
+      try {
+        if (f.path && IS_ELECTRON) {
+          const res = await window.electronAPI.readAsDataURL(f.path);
+          if (res.type === 'text') {
+            prevEl.innerHTML = `<pre>${esc(res.content.length > 5000 ? res.content.slice(0,5000)+'\n…(已截断)' : res.content)}</pre>`;
+          } else if (res.mime.startsWith('image/')) {
+            prevEl.innerHTML = `<img src="${res.dataUrl}" alt="${esc(f.name)}">`;
+          } else if (res.mime.startsWith('video/')) {
+            prevEl.innerHTML = `<video src="${res.dataUrl}" controls></video>`;
+          } else if (res.mime.startsWith('audio/')) {
+            prevEl.innerHTML = `<audio src="${res.dataUrl}" controls style="width:100%"></audio>`;
+          } else {
+            prevEl.innerHTML = `<div style="color:var(--text-dim);">文件：${esc(f.name)}<br>（此类型无预览，可双击用系统程序打开）</div>`;
+          }
+        } else if (f.browserFile) {
+          const mime = f.browserFile.type || '';
+          if (mime.startsWith('image/')) {
+            const url = URL.createObjectURL(f.browserFile);
+            prevEl.innerHTML = `<img src="${url}">`;
+          } else if (mime.startsWith('video/')) {
+            const url = URL.createObjectURL(f.browserFile);
+            prevEl.innerHTML = `<video src="${url}" controls></video>`;
+          } else if (mime.startsWith('audio/')) {
+            const url = URL.createObjectURL(f.browserFile);
+            prevEl.innerHTML = `<audio src="${url}" controls style="width:100%"></audio>`;
+          } else if (f.browserFile.size < 2*1024*1024) {
+            const text = await f.browserFile.text();
+            prevEl.innerHTML = `<pre>${esc(text)}</pre>`;
+          } else if (mime === 'application/pdf') {
+            const url = URL.createObjectURL(f.browserFile);
+            prevEl.innerHTML = `<a class="btn primary" href="${url}" target="_blank">在新标签页打开 PDF</a>`;
+          } else {
+            prevEl.innerHTML = '<div style="color:var(--text-dim);">此文件类型无法预览（可双击在 Electron 中用系统程序打开）</div>';
+          }
+        } else {
+          prevEl.innerHTML = '<div style="color:var(--text-dim);">无法预览：请重新选择资料文件夹</div>';
+        }
+      } catch (err) { prevEl.innerHTML = '<div style="color:var(--text-dim);">预览失败：' + esc(err) + '</div>'; }
+    }
+
+    drawList();
+  }
+});
+
+/* ---------- 设置（快捷键改为 Ctrl+Alt+N） ---------- */
+registerApp({
+  id: 'settings',
+  name: '设置',
+  icon: '⚙️',
+  w: 460, h: 520,
+  render(body, meta) {
+    const s = State.settings;
+    body.innerHTML = `
+      <div class="field">
+        <label>桌面背景</label>
+        <div class="row">
+          <button class="btn" id="set-wallpaper">🖼️ 选择背景图片…</button>
+          <button class="btn" id="set-wallpaper-reset">恢复默认</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>字体</label>
+        <select class="input" id="set-font">
+          <option value="default">系统默认</option>
+          <option value="'Segoe UI', 'Microsoft YaHei', sans-serif">微软雅黑</option>
+          <option value="'SimSun', serif">宋体</option>
+          <option value="'KaiTi', serif">楷体</option>
+          <option value="'Courier New', monospace">等宽</option>
+          <option value="'Arial', sans-serif">Arial</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>字号：<span id="font-size-label">${s.fontSize}px</span></label>
+        <input type="range" id="set-font-size" min="12" max="22" value="${s.fontSize}">
+      </div>
+      <div class="field">
+        <label>提示音</label>
+        <div class="switch${s.soundEnabled !== false ? ' on' : ''}" id="set-sound"></div>
+      </div>
+        <div class="field">
+          <label>剪贴板历史缓存路径（必填，留空则剪贴板历史不可用）</label>
+          <div class="row">
+            <input class="input" id="set-clip-path" style="flex:1" placeholder="如 H:\my\clip-cache" value="${esc(s.clipPath || '')}">
+            <button class="btn sm" id="set-clip-browse">浏览…</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">文字存 clipboard.txt，图片存原始文件</div>
+        </div>
+        <div class="field">
+          <label>文件传输保存路径（手机传到此目录，必填，留空则传输不可用）</label>
+          <div class="row">
+            <input class="input" id="set-transfer-path" style="flex:1" placeholder="如 H:\my\received" value="${esc(s.transferPath || '')}">
+            <button class="btn sm" id="set-transfer-browse">浏览…</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>电脑共享给手机的目录（手机可在此目录下载文件；留空则复用上面的保存路径）</label>
+          <div class="row">
+            <input class="input" id="set-transfer-share" style="flex:1" placeholder="留空则复用传输保存路径" value="${esc(s.transferShareDir || '')}">
+            <button class="btn sm" id="set-transfer-share-browse">浏览…</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>文件传输端口（默认 8888）</label>
+          <input class="input" id="set-transfer-port" style="width:120px" value="${esc(s.transferPort || 8888)}">
+        </div>        <div class="field">
+          <label>快捷操作 JSON 目录（留空则用默认目录）</label>
+          <div class="row">
+            <input class="input" id="set-actions-dir" style="flex:1" placeholder="存放 .json 快捷操作的文件夹" value="${esc(s.actionsDir || '')}">
+            <button class="btn sm" id="set-actions-browse">浏览…</button>
+            <button class="btn sm" id="set-actions-open">打开目录</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">每个 .json 定义一个快捷操作，程序启动时自动扫描</div>
+        </div>
+        <div class="field">
+          <label>自定义 Action JS 目录（可选，高级用户）</label>
+          <div class="row">
+            <input class="input" id="set-actions-js-dir" style="flex:1" placeholder="存放自定义 registerActionType 的 .js" value="${esc(s.actionsJsDir || '')}">
+            <button class="btn sm" id="set-actions-js-browse">浏览…</button>
+          </div>
+        </div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
+      <div class="row">
+        <button class="btn primary" id="set-save">💾 保存快照 (Ctrl+S)</button>
+        <button class="btn" id="set-export">📤 导出快照</button>
+        <button class="btn" id="set-import">📥 导入快照</button>
+      </div>
+      <div style="margin-top:12px;color:var(--text-dim);font-size:12px;line-height:1.6;">
+        快捷键：Ctrl+S 保存 · Ctrl+Alt+N 新建便签<br>
+        运行模式：${IS_ELECTRON ? 'Electron（已启用本地文件能力）' : '浏览器（使用浏览按钮）'}
+      </div>
+    `;
+
+    $('#set-wallpaper').addEventListener('click', () => $('#wallpaper-picker').click());
+    $('#set-wallpaper-reset').addEventListener('click', () => {
+      s.wallpaper = null; applyWallpaper(); toast('已恢复默认背景');
+    });
+    $('#set-font').value = s.fontFamily || 'default';
+    $('#set-font').addEventListener('change', e => { s.fontFamily = e.target.value; applyTheme(); });
+    $('#set-font-size').addEventListener('input', e => {
+      s.fontSize = Number(e.target.value); $('#font-size-label').textContent = s.fontSize + 'px'; applyTheme();
+    });
+    const soundSw = $('#set-sound');
+    soundSw.addEventListener('click', () => { s.soundEnabled = !(s.soundEnabled !== false); soundSw.classList.toggle('on'); });
+    $('#set-save').addEventListener('click', () => persistAll(true));
+    $('#set-export').addEventListener('click', () => exportSnapshot());
+    $('#set-import').addEventListener('click', () => $('#snapshot-import').click());
+
+      // 剪贴板缓存路径
+      const clipPathInput = $('#set-clip-path');
+      const transferPathInput = $('#set-transfer-path');
+      const transferShareInput = $('#set-transfer-share');
+      const transferPortInput = $('#set-transfer-port');
+      clipPathInput.addEventListener('change', () => { s.clipPath = clipPathInput.value.trim(); persistAll(false); });
+      $('#set-clip-browse').addEventListener('click', async () => {
+        if (!IS_ELECTRON) { toast('该功能仅在 Electron 下可用'); return; }
+        const dir = await window.electronAPI.selectDir();
+        if (!dir) { return; }
+        clipPathInput.value = dir; s.clipPath = dir; persistAll(false); savePaths();
+      });
+      transferPathInput.addEventListener('change', () => { s.transferPath = transferPathInput.value.trim(); persistAll(false); });
+      $('#set-transfer-browse').addEventListener('click', async () => {
+        if (!IS_ELECTRON) { toast('该功能仅在 Electron 下可用'); return; }
+        const dir = await window.electronAPI.selectDir();
+        if (!dir) { return; }
+        transferPathInput.value = dir; s.transferPath = dir; persistAll(false); savePaths();
+      });
+      transferShareInput.addEventListener('change', () => { s.transferShareDir = transferShareInput.value.trim(); persistAll(false); });
+      $('#set-transfer-share-browse').addEventListener('click', async () => {
+        if (!IS_ELECTRON) { toast('该功能仅在 Electron 下可用'); return; }
+        const dir = await window.electronAPI.selectDir();
+        if (!dir) { return; }
+        transferShareInput.value = dir; s.transferShareDir = dir; persistAll(false); savePaths();
+      });
+      transferPortInput.addEventListener('change', () => {
+        s.transferPort = Number(transferPortInput.value) || 8888; persistAll(false);
+      });
+      function savePaths() {
+        s.clipPath = clipPathInput.value.trim();
+        s.transferPath = transferPathInput.value.trim();
+        s.transferShareDir = transferShareInput.value.trim();
+        s.transferPort = Number(transferPortInput.value) || 8888;
+        if (IS_ELECTRON && typeof Clips !== 'undefined' && Clips.applySettings) Clips.applySettings();
+      }
+
+      // 快捷操作目录
+      const actionsDirInput = $('#set-actions-dir');
+      const actionsJsDirInput = $('#set-actions-js-dir');
+      actionsDirInput.addEventListener('change', () => { s.actionsDir = actionsDirInput.value.trim(); persistAll(false); });
+      actionsJsDirInput.addEventListener('change', () => { s.actionsJsDir = actionsJsDirInput.value.trim(); persistAll(false); });
+      $('#set-actions-browse').addEventListener('click', async () => {
+        if (!IS_ELECTRON) { toast('该功能仅在 Electron 下可用'); return; }
+        const dir = await window.electronAPI.selectDir();
+        if (!dir) { return; }
+        actionsDirInput.value = dir; s.actionsDir = dir; persistAll(false);
+      });
+      $('#set-actions-js-browse').addEventListener('click', async () => {
+        if (!IS_ELECTRON) { toast('该功能仅在 Electron 下可用'); return; }
+        const dir = await window.electronAPI.selectDir();
+        if (!dir) { return; }
+        actionsJsDirInput.value = dir; s.actionsJsDir = dir; persistAll(false);
+      });
+      $('#set-actions-open').addEventListener('click', async () => {
+        if (!IS_ELECTRON) { toast('该功能仅在 Electron 下可用'); return; }
+        const dir = (s.actionsDir && s.actionsDir.trim()) || (await window.electronAPI.actionsEnsureDefaultDir()).dir;
+        const r = await window.electronAPI.actionsOpenFolder(dir);
+        if (!r.ok) toast('打开失败: ' + r.msg);
+      });
+  }
+});
+
+/* ============================================================
+ * 快捷操作引擎（Actions）
+ *   registerActionType(type, handler): 注册自定义动作类型
+ *   definePlugin({kind,id,name,icon,register}): 自定义 JS 显式声明入口
+ *   ActionsEngine.loadAll: 加载 + 校验 + 收集错误（分"JS 注册"与"JSON 校验"两阶段）
+ *   ActionsEngine.execute: 按顺序执行动作
+ * 内置动作: toast / delay / copy-text / open-url / open-folder / open-app / launch-app
+ * ============================================================ */
+const ActionTypes = {};
+// 由自定义 JS 注册的动作类型（重新加载时撤销；内建动作类型永不撤销）
+const PluginActionTypes = new Set();
+
+function registerActionType(type, handler) {
+  if (typeof type !== 'string' || !type.trim()) {
+    reportPluginError('动作类型注册', 'registerActionType 的 type 必须是非空字符串', '例如 registerActionType("my-action", async (act) => { ... })');
+    return;
+  }
+  if (typeof handler !== 'function') {
+    reportPluginError('动作类型注册', '动作类型 "' + type + '" 的 handler 不是函数', '第二个参数必须是 (act, ctx) => {...} 形式的函数');
+    return;
+  }
+  if (!(type in ActionTypes) && _pluginSource) PluginActionTypes.add(type);
+  ActionTypes[type] = handler;
+}
+
+/* 自定义 JS 的显式声明入口（definePlugin）。
+ * 不做隔离：插件仍与页面同上下文、全功能；此入口只负责"名实相符"与可检查。
+ * 老写法 registerActionType(...) 仍然完全可用。
+ *
+ * kind 的三种取值（声明了就必须做到，否则报错）：
+ *   action  —— 只提供动作类型给 .json 使用（可注册多个 type，不可注册 app）
+ *   app     —— 注册一个可开窗的应用（必须注册恰好一个，且 id 与 def.id 一致）
+ *   service —— 静默后台服务：不注册图标、不进网格、不算 action，start() 里悄悄生效
+ */
+function makeDefinePlugin(fileName) {
+  return function definePlugin(def) {
+    if (!def || typeof def !== 'object' || Array.isArray(def)) {
+      reportPluginError('插件声明', 'definePlugin 的参数必须是对象', '传入 { kind: "action"|"app"|"service", ... }');
+      return;
+    }
+    const kind = String(def.kind || '').toLowerCase();
+    if (kind !== 'action' && kind !== 'app' && kind !== 'service') {
+      reportPluginError('插件声明', 'kind 必须是 "action"、"app" 或 "service"（收到 "' + (def.kind || '') + '"）',
+        'action = 给 .json 提供动作类型；app = 注册可开窗应用；service = 后台静默服务');
+      return;
+    }
+    // service 用 start，其余用 register
+    const entryName = kind === 'service' ? 'start' : 'register';
+    if (typeof def[entryName] !== 'function') {
+      reportPluginError('插件声明', '缺少 ' + entryName + ' 函数',
+        kind === 'service'
+          ? '添加 start(api) { ... }，在里写启动时要静默执行的代码'
+          : '添加 register(api) { api.registerActionType(...) / api.registerApp(...) }');
+      return;
+    }
+    if ((kind === 'app' || kind === 'service') && (typeof def.id !== 'string' || !def.id.trim())) {
+      reportPluginError('插件声明', 'kind 为 "' + kind + '" 时必须提供字符串 id', '添加 id: "' + (kind === 'service' ? 'my-service' : 'myapp') + '"');
+      return;
+    }
+
+    // service 的开关状态：存"已禁用"集合，这样新插件默认启用
+    if (kind === 'service' && !State.settings.disabledServices) State.settings.disabledServices = [];
+
+    // 清理栈：插件登记的所有副作用，在"关闭开关"或"重新加载"时统一撤销
+    const cleanupFns = [];
+    let registeredAppCount = 0;
+    let registeredTypeCount = 0;
+    // 服务的动态状态文本（如"当前：保持活跃"），由 api.setStatus() 更新
+    const svcState = { statusText: '' };
+
+    const api = {
+      registerActionType: function (type, handler) {
+        registeredTypeCount++;
+        registerActionType(type, handler);
+      },
+      /* 更新在"后台服务"列表里显示的状态文字（仅 service 有意义） */
+      setStatus: function (text) {
+        svcState.statusText = String(text == null ? '' : text);
+        try { if (typeof refreshServicePanel === 'function') refreshServicePanel(); } catch (e) {}
+      },
+      getStatus: function () { return svcState.statusText; },
+      registerApp: function (app) {
+        registeredAppCount++;
+        // 补全元数据后注册，并记录属于哪个插件（便于重新加载时撤销）
+        const merged = Object.assign({}, {
+          id: def.id || (app && app.id),
+          name: def.name || (app && app.name),
+          icon: def.icon || (app && app.icon) || '🧩',
+          describe: def.describe
+        }, app || {});
+        // id 不一致会让 .json 的 launch-app 引用到意料之外的应用，必须提示
+        if (def.id && app && app.id && app.id !== def.id) {
+          reportPluginError('插件声明', 'definePlugin.id("' + def.id + '") 与 registerApp.id("' + app.id + '") 不一致',
+            '两处写同一个 id，否则 .json 里 launch-app 的 appId 会难以对应');
+        }
+        const before = merged.id && AppRegistry[merged.id];
+        registerApp(merged);
+        if (merged.id && !before && AppRegistry[merged.id] === merged && !BuiltinAppIds.has(merged.id)) {
+          if (!ActionsEngine._pluginAppIds) ActionsEngine._pluginAppIds = [];
+          if (ActionsEngine._pluginAppIds.indexOf(merged.id) < 0) ActionsEngine._pluginAppIds.push(merged.id);
+        }
+      },
+      /* service 专用：登记一个清理函数，关闭开关/重新加载时调用 */
+      onCleanup: function (fn) {
+        if (typeof fn !== 'function') {
+          reportPluginError('插件声明', 'onCleanup 的参数必须是函数', '传入 () => { ... }，用于撤销 start() 里注册的监听/定时器');
+          return;
+        }
+        cleanupFns.push(fn);
+      },
+      toast: toast,
+      pluginFile: fileName
+    };
+
+    // ---- service：登记到服务表，按开关决定是否启动 ----
+    if (kind === 'service') {
+      const svc = {
+        id: def.id.trim(),
+        name: def.name || def.id,
+        icon: def.icon || '⚙️',
+        describe: def.describe || '',
+        file: fileName,
+        def: def,
+        api: api,
+        cleanupFns: cleanupFns,
+        state: svcState,       // 动态状态文本容器（api.setStatus 更新）
+        running: false
+      };
+      const dup = (ActionsEngine.services || []).find(s => s.id === svc.id);
+      if (dup) {
+        reportPluginError('服务声明', '服务 id "' + svc.id + '" 与 ' + dup.file + ' 重复，本次被忽略', '换一个不同的 id');
+        return;
+      }
+      if (!ActionsEngine.services) ActionsEngine.services = [];
+      ActionsEngine.services.push(svc);
+      return;   // service 不参与 action/app 的契约核对
+    }
+
+    // ---- action / app ----
+    try {
+      def.register(api);
+    } catch (e) {
+      reportPluginError('插件执行', String(e && e.message || e), '检查 register(api) 内部代码');
+      return;
+    }
+
+    // 契约核对：声明什么就应当做到什么，否则就是"名实不符"
+    if (kind === 'action' && registeredAppCount > 0) {
+      reportPluginError('插件声明', 'kind 为 "action" 却调用了 registerApp',
+        '该插件要注册应用，应把 kind 改为 "app"');
+    }
+    if (kind === 'app' && registeredAppCount === 0) {
+      reportPluginError('插件声明', 'kind 为 "app" 但没有注册任何应用',
+        '在 register(api) 里调用 api.registerApp({ render(body) { ... } })');
+    }
+    if (kind === 'action' && registeredTypeCount === 0 && registeredAppCount === 0) {
+      reportPluginError('插件声明', 'kind 为 "action" 但没有注册任何动作类型',
+        '在 register(api) 里调用 api.registerActionType("my-type", async (act) => { ... })');
+    }
+  };
+}
+
+/* 供服务插件刷新"后台服务"面板（由「快捷操作」窗口渲染时登记） */
+let refreshServicePanel = null;
+
+const ActionsEngine = {
+  loadedActions: [],
+  errors: [],
+  customJsDir: '',
+  services: [],          // kind:'service' 的后台服务（见 startService/stopService）
+
+  /* ---------- 后台服务（kind: 'service'）---------- */
+
+  /* 服务是否被用户关闭（存"已禁用"集合，新服务默认启用） */
+  isServiceDisabled(id) {
+    const list = (State.settings && State.settings.disabledServices) || [];
+    return list.indexOf(id) >= 0;
+  },
+
+  /* 启动一个服务（登记清理栈、执行 start()） */
+  startService(svc) {
+    if (!svc || svc.running) return;
+    try {
+      svc.def.start(svc.api);
+      svc.running = true;
+    } catch (e) {
+      // 启动失败：明确报错并标记未生效，避免"静默失效没人知道"
+      svc.running = false;
+      this.errors.push({
+        file: svc.file, type: '后台服务',
+        reason: '服务 "' + svc.name + '" 启动失败: ' + String(e && e.message || e),
+        fix: '检查 start(api) 内部代码'
+      });
+    }
+  },
+
+  /* 停止一个服务：执行清理栈，撤销它注册的所有副作用 */
+  stopService(svc) {
+    if (!svc || !svc.running) return;
+    (svc.cleanupFns || []).slice().forEach(fn => {
+      try { fn(); } catch (e) {
+        this.errors.push({ file: svc.file, type: '后台服务', reason: '服务 "' + svc.name + '" 清理失败: ' + String(e && e.message || e), fix: '检查 onCleanup 注册的函数' });
+      }
+    });
+    // 注意：必须清空数组内容，不能替换引用。
+    // 插件里的 api.onCleanup 闭包捕获的是这个数组本身，
+    // 若此处 svc.cleanupFns = []，闭包仍会往旧数组推，导致下次停止时清不到东西。
+    if (svc.cleanupFns) svc.cleanupFns.length = 0;
+    svc.running = false;
+  },
+
+  /* 切换服务开关（写设置 + 立即启停） */
+  setServiceEnabled(id, enabled) {
+    const list = (State.settings.disabledServices || []).slice();
+    const i = list.indexOf(id);
+    if (enabled && i >= 0) list.splice(i, 1);
+    else if (!enabled && i < 0) list.push(id);
+    State.settings.disabledServices = list;
+    const svc = (this.services || []).find(s => s.id === id);
+    if (enabled) this.startService(svc);
+    else this.stopService(svc);
+  },
+
+  /* 撤销所有服务（重新加载前调用） */
+  unloadServices() {
+    (this.services || []).forEach(svc => this.stopService(svc));
+    this.services = [];
+  },
+
+  /* 默认动作目录（Electron 下为用户数据目录内的 workbench-actions） */
+  async getDefaultDir() {
+    if (IS_ELECTRON) {
+      const r = await window.electronAPI.actionsEnsureDefaultDir();
+      return r.ok ? r.dir : '';
+    }
+    return 'workbench-actions';
+  },
+
+  /* ---------- 加载 ----------
+   * 分两个明确阶段，避免"依赖扫描顺序碰巧正确"：
+   *   阶段 1  执行所有 .js（注册动作类型 / 注册应用 / 登记后台服务），收集错误
+   *   阶段 2  读取并校验所有 .json（此时 ActionTypes 已完整，不会误判"未知动作类型"）
+   *   阶段 3  启动未被关闭的后台服务
+   */
+  async loadAll(customJsDir) {
+    this.loadedActions = [];
+    this.errors = [];
+    this.customJsDir = customJsDir || '';
+    // 重新加载：先撤销上一次由自定义 JS 注册的应用与后台服务
+    this.unloadPluginApps();
+    this.unloadServices();
+
+    let dir = '';
+    if (IS_ELECTRON) {
+      const s = State.settings;
+      dir = (s.actionsDir && s.actionsDir.trim()) || await this.getDefaultDir();
+    }
+
+    // 收集所有 .js 文件（来自自定义 JS 目录 + 快捷操作目录）
+    const jsFiles = [];
+    if (this.customJsDir) {
+      const r = await window.electronAPI.actionsReadFiles(this.customJsDir);
+      if (r.ok) jsFiles.push(...r.files.filter(x => x.name.endsWith('.js')));
+      else this.errors.push({ file: this.customJsDir, type: '自定义JS目录', reason: r.msg, fix: '检查自定义 Action JS 目录是否存在且可读' });
+    }
+
+    if (!dir) {
+      this.errors.push({ file: '(目录)', type: '目录', reason: '未配置快捷操作目录', fix: '请在设置中填写快捷操作JSON目录' });
+      // 目录缺失也要执行已收集到的自定义 JS（阶段 1 独立成立），并启动其中的后台服务
+      for (const f of jsFiles) await this.loadCustomJsFile(f);
+      this.startPendingServices();
+      return;
+    }
+
+    let files;
+    if (IS_ELECTRON) {
+      const r = await window.electronAPI.actionsReadFiles(dir);
+      if (!r.ok) {
+        this.errors.push({ file: '(目录)', type: '目录', reason: r.msg, fix: '检查目录是否存在且可读' });
+        for (const f of jsFiles) await this.loadCustomJsFile(f);
+        this.startPendingServices();
+        return;
+      }
+      files = r.files;
+    } else {
+      files = [];
+    }
+
+    // ===== 阶段 1：先执行全部 .js（注册动作类型 / 应用 / 登记后台服务）=====
+    jsFiles.push(...files.filter(x => x.name.endsWith('.js')));
+    for (const f of jsFiles) await this.loadCustomJsFile(f);
+
+    // ===== 阶段 2：再校验全部 .json（此时 ActionTypes 已完整）=====
+    for (const f of files.filter(x => x.name.endsWith('.json'))) {
+      const parsed = await this.loadAndValidate(f);
+      if (parsed) this.loadedActions.push(parsed);
+    }
+
+    // ===== 阶段 3：启动未被用户关闭的后台服务 =====
+    this.startPendingServices();
+  },
+
+  /* 启动所有已登记且未被关闭的服务（所有加载路径都要走到这一步） */
+  startPendingServices() {
+    (this.services || []).forEach(svc => {
+      if (this.isServiceDisabled(svc.id)) return;
+      this.startService(svc);
+    });
+  },
+
+  /* 撤销上一次由自定义 JS 注册的应用与动作类型（重新加载时调用，避免累积/旧窗口指向旧对象） */
+  unloadPluginApps() {
+    (this._pluginAppIds || []).forEach(id => {
+      const app = AppRegistry[id];
+      if (!app || BuiltinAppIds.has(id)) return;
+      delete AppRegistry[id];
+      // 关闭指向该应用的已有窗口
+      Object.keys(WindowManager.windows).forEach(wid => {
+        if (WindowManager.windows[wid].appId === id) WindowManager.close(wid);
+      });
+    });
+    this._pluginAppIds = [];
+    // 撤销插件注册的动作类型（内建类型不在 PluginActionTypes 里，不受影响）
+    PluginActionTypes.forEach(t => { delete ActionTypes[t]; });
+    PluginActionTypes.clear();
+  },
+
+  async loadCustomJsFile(f) {
+    const prevSource = _pluginSource;
+    _pluginSource = f.name;   // 注册期间的问题都归属到这个文件
+    try {
+      const r = await window.electronAPI.actionsReadText(f.path);
+      if (!r.ok) throw new Error(r.msg);
+      const fn = new Function('definePlugin', 'registerActionType', r.content);
+      fn(makeDefinePlugin(f.name), registerActionType);
+    } catch (e) {
+      this.errors.push({ file: f.name, type: '自定义JS', reason: String(e.message || e), fix: '检查 JS 语法；可用 definePlugin({...}) 声明插件，或直接调用 registerActionType(type, handler)' });
+    } finally {
+      _pluginSource = prevSource;
+    }
+  },
+
+  /* ---------- 加载并校验单个 json ---------- */
+  async loadAndValidate(f) {
+    let raw;
+    try {
+      const r = await window.electronAPI.actionsReadText(f.path);
+      if (!r.ok) throw new Error(r.msg);
+      raw = r.content;
+    } catch (e) {
+      this.errors.push({ file: f.name, type: '读取', reason: String(e.message || e), fix: '确保文件可读' });
+      return null;
+    }
+    let def;
+    try { def = JSON.parse(raw); }
+    catch (e) {
+      this.errors.push({ file: f.name, type: 'JSON', reason: 'JSON 解析失败: ' + e.message, fix: '检查 JSON 语法（逗号、引号、大括号是否完整）' });
+      return null;
+    }
+    const issues = this.validate(def);
+    if (issues.length) {
+      issues.forEach(issue => this.errors.push(Object.assign({ file: f.name, type: '校验' }, issue)));
+      return null;
+    }
+    return def;
+  },
+
+  validate(def) {
+    const issues = [];
+    if (!def || typeof def !== 'object' || Array.isArray(def)) { issues.push({ reason: '不是对象', fix: 'JSON 顶层应为 { ... } 对象' }); return issues; }
+    if (typeof def.id !== 'string' || !def.id.trim()) issues.push({ reason: '缺少必填字段 id', fix: '添加 "id": "标识"' });
+    if (typeof def.name !== 'string' || !def.name.trim()) issues.push({ reason: '缺少必填字段 name', fix: '添加 "name": "显示名称"' });
+    if (typeof def.icon !== 'string' || !def.icon.trim()) issues.push({ reason: '缺少必填字段 icon', fix: '添加 "icon": "📁" 或任意 emoji' });
+    if (def.describe !== undefined && typeof def.describe !== 'string') issues.push({ reason: 'describe 应为字符串', fix: '把描述写成文字' });
+    if (!Array.isArray(def.actions) || def.actions.length === 0) issues.push({ reason: 'actions 必须是非空数组', fix: '在 actions 数组里写至少一个动作' });
+    if (Array.isArray(def.actions)) {
+      def.actions.forEach((a, i) => {
+        if (!a || typeof a !== 'object') { issues.push({ reason: 'actions[' + i + '] 不是对象', fix: '每个动作应为 { ... }' }); return; }
+        if (typeof a.type !== 'string' || !a.type) issues.push({ reason: 'actions[' + i + '] 缺少 type', fix: '为第 ' + (i+1) + ' 个动作添加 type' });
+        else if (!(a.type in ActionTypes)) issues.push({
+          reason: 'actions[' + i + '] 未知动作类型 "' + a.type + '"',
+          fix: '若该类型由自定义 JS 提供：请检查那个 .js 是否加载成功（见下方错误）；否则检查类型拼写'
+        });
+        if ((a.type === 'open-folder' || a.type === 'open-app') && (!a.path || typeof a.path !== 'string' || !a.path.trim()))
+          issues.push({ reason: 'actions[' + i + '] 缺少 path', fix: '为 open-folder/open-app 添加 path' });
+        if (a.type === 'launch-app' && (!a.appId || typeof a.appId !== 'string' || !a.appId.trim()))
+          issues.push({ reason: 'actions[' + i + '] 缺少 appId', fix: '为 launch-app 添加 appId，例如 "appId": "myapp"' });
+        if (a.type === 'open-url' && (!a.url || typeof a.url !== 'string' || !a.url.trim()))
+          issues.push({ reason: 'actions[' + i + '] 缺少 url', fix: '为 open-url 添加 url' });
+        if (a.type === 'copy-text' && !a.text) issues.push({ reason: 'actions[' + i + '] 缺少 text', fix: '为 copy-text 添加 text' });
+        if (a.type === 'delay' && (typeof a.ms !== 'number' || a.ms < 0)) issues.push({ reason: 'actions[' + i + '] 缺少合法 delay.ms', fix: '为 delay 添加 ms 毫秒数' });
+      });
+    }
+    return issues;
+  },
+
+  /* ---------- 执行 ---------- */
+  async execute(actionDef) {
+    for (let i = 0; i < (actionDef.actions || []).length; i++) {
+      const act = actionDef.actions[i];
+      try { await this.runAction(act, actionDef); }
+      catch (e) { toast('[' + actionDef.name + '] 动作' + (i+1) + '(' + act.type + ') 失败: ' + (e.message || e), 3200); }
+    }
+  },
+
+  async runAction(act, actionDef) {
+    const handler = ActionTypes[act.type];
+    if (!handler) throw new Error('未知动作类型: ' + act.type);
+    const result = await handler(act, { actionDef, engine: this });
+    if (result === false) throw new Error('动作执行返回失败');
+  },
+
+  /* 错误汇总弹窗 */
+  showErrorSummary() {
+    if (!this.errors.length) return;
+    WindowManager.create('actionsErrorReport');
+  }
+};
+
+/* ---------- 内置动作类型注册 ---------- */
+registerActionType('toast', async (act) => { toast(act.text || '🔔'); });
+registerActionType('delay', async (act) => { await new Promise(r => setTimeout(r, act.ms || 0)); });
+registerActionType('copy-text', async (act) => {
+  if (IS_ELECTRON) await window.electronAPI.clipCopyText(act.text);
+  else { try { await navigator.clipboard.writeText(act.text); } catch (e) { throw e; } }
+  toast('已复制: ' + String(act.text).slice(0, 20));
+});
+registerActionType('open-url', async (act) => {
+  if (IS_ELECTRON) {
+    const r = await window.electronAPI.actionsOpenExternal(act.url);
+    if (!r.ok) throw new Error(r.msg);
+  } else window.open(act.url, '_blank');
+});
+registerActionType('open-folder', async (act) => {
+  if (IS_ELECTRON) {
+    const r = await window.electronAPI.actionsOpenFolder(act.path);
+    if (!r.ok) throw new Error(r.msg);
+  } else throw new Error('浏览器模式不支持打开文件夹');
+});
+registerActionType('open-app', async (act) => {
+  if (IS_ELECTRON) {
+    const exe = /\.exe$/i.test(act.path);
+    const r = await window.electronAPI.actionsLaunchApp(act.path, exe);
+    if (!r.ok) throw new Error(r.msg);
+  } else throw new Error('浏览器模式不支持打开应用');
+});
+/* 打开一个已注册的应用/窗口（由自定义 JS 的 kind:"app" 注册，或任何内建应用）。
+ * 说明：appId 是否已注册在"执行期"检查，不在加载期硬校验 —— 因为 JS 与 JSON 的
+ * 加载顺序不保证，加载期校验会误判为"未知类型"。 */
+registerActionType('launch-app', async (act) => {
+  const id = typeof act.appId === 'string' ? act.appId.trim() : '';
+  if (!id) throw new Error('launch-app 缺少 appId');
+  if (!getApp(id)) throw new Error('未找到应用 "' + id + '"（是否对应的自定义 JS 加载失败？）');
+  WindowManager.create(id);
+});
+
+/* ---------- 为每个已加载的操作注册成桌面应用 ---------- */
+// 快捷操作统一由"快捷操作"总入口窗口（网格）展示，不再为每个操作生成桌面图标。
+// 加载结果存于 ActionsEngine.loadedActions，供该窗口渲染。
+function registerActionApps() {
+  // 无需再注册桌面应用；网格窗口直接从 ActionsEngine.loadedActions 读取
+}
+
+/* ---------- 快捷操作总入口（网格） ---------- */
+registerApp({
+  id: 'actionsErrorReport',
+  name: '快捷操作',
+  icon: '🖱️',
+  w: 680, h: 520,
+  render(body, meta) {
+    const renderAll = () => {
+      const acts = ActionsEngine.loadedActions || [];
+      const errs = ActionsEngine.errors || [];
+      const svcs = ActionsEngine.services || [];
+      body.innerHTML =
+        '<div style="display:flex;flex-direction:column;height:100%;">' +
+          '<div class="row" style="margin-bottom:10px;">' +
+            '<span style="font-size:13px;color:var(--text-dim);">'+acts.length+' 个成功 · '+errs.length+' 个失败</span>' +
+            '<button class="btn sm primary" id="act-reload">🔄 重新加载</button>' +
+            '<button class="btn sm" id="act-opendir">📂 打开目录</button>' +
+          '</div>' +
+          (svcs.length ? '<div id="act-services" style="margin-bottom:10px;border:1px solid var(--border);border-radius:8px;padding:8px;flex:0 0 auto;"></div>' : '') +
+          (acts.length ? '' : '<div style="color:var(--text-dim);text-align:center;padding:20px;">暂无快捷操作，放一些 .json 到配置目录后点“重新加载”</div>') +
+          '<div id="act-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;flex:0 0 auto;"></div>' +
+          (errs.length ? '<div id="act-errs" style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;overflow:auto;max-height:180px;"></div>' : '') +
+        '</div>';
+
+      // 网格：每个操作一个格子
+      const grid = body.querySelector('#act-grid');
+      acts.forEach(action => {
+        const tile = document.createElement('div');
+        tile.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border:1px solid var(--border);border-radius:8px;cursor:pointer;text-align:center;background:rgba(255,255,255,0.03);';
+        tile.innerHTML = '<div style="font-size:30px;line-height:1;">'+esc(action.icon||'⚡')+'</div><div style="font-size:12px;word-break:break-all;">'+esc(action.name)+'</div>';
+        tile.title = (action.describe || action.name);
+        tile.addEventListener('click', () => ActionsEngine.execute(action));
+        grid.appendChild(tile);
+      });
+
+      // 后台服务开关（kind: 'service'）
+      const svcBox = body.querySelector('#act-services');
+      if (svcBox) {
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:12px;color:var(--text-dim);margin-bottom:6px;';
+        title.textContent = '后台服务（启动后静默生效，可开关）';
+        svcBox.appendChild(title);
+        svcs.forEach(svc => {
+          const enabled = !ActionsEngine.isServiceDisabled(svc.id);
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 0;';
+          const failed = !svc.running && enabled;
+          row.innerHTML =
+            '<div style="flex:1;min-width:0;">' +
+              '<div style="font-size:13px;word-break:break-all;">' + esc(svc.icon) + ' ' + esc(svc.name) +
+                (failed ? ' <span style="color:#e81123;font-size:11px;">（启动失败）</span>' : '') + '</div>' +
+              '<div style="font-size:11px;color:var(--text-dim);word-break:break-all;">' + esc(svc.file) + (svc.describe ? (' · ' + esc(svc.describe)) : '') + '</div>' +
+              (svc.state && svc.state.statusText
+                ? ('<div style="font-size:11px;color:var(--accent);word-break:break-all;">' + esc(svc.state.statusText) + '</div>')
+                : '') +
+            '</div>';
+          const sw = document.createElement('div');
+          sw.className = 'switch' + (enabled ? ' on' : '');
+          sw.title = enabled ? '点击关闭' : '点击开启';
+          sw.style.cssText = 'flex:0 0 auto;';
+          sw.addEventListener('click', () => {
+            ActionsEngine.setServiceEnabled(svc.id, !enabled);
+            persistAll(false);
+            renderAll();
+            toast((enabled ? '已关闭服务：' : '已开启服务：') + svc.name);
+          });
+          row.appendChild(sw);
+          svcBox.appendChild(row);
+        });
+      }
+
+      // 错误列表
+      const errBox = body.querySelector('#act-errs');
+      if (errBox) {
+        errs.forEach(er => {
+          const d = document.createElement('div');
+          d.style.cssText = 'border:1px solid #e8112366;background:#e8112311;border-radius:6px;padding:6px;margin-bottom:5px;font-size:12px;';
+          d.innerHTML = '<div style="font-weight:600;">'+esc(er.file||'?')+' · '+esc(er.type||'')+'</div>'+
+            '<div>原因：'+esc(er.reason||'')+'</div>'+
+            '<div style="color:var(--text-dim);">建议：'+esc(er.fix||'')+'</div>';
+          errBox.appendChild(d);
+        });
+      }
+
+      // 重新加载
+      const reloadBtn = body.querySelector('#act-reload');
+      if (reloadBtn) reloadBtn.addEventListener('click', async () => {
+        toast('正在重新加载快捷操作…');
+        const hadPluginApps = (ActionsEngine._pluginAppIds || []).length > 0;
+        await ActionsEngine.loadAll(State.settings.actionsJsDir);
+        renderAll();
+        const errs = ActionsEngine.errors.length;
+        const svcCount = (ActionsEngine.services || []).filter(s => s.running).length;
+        toast('重新加载完成：' + ActionsEngine.loadedActions.length + ' 个操作' +
+          (svcCount ? ('，' + svcCount + ' 个后台服务生效') : '') +
+          (errs ? ('，' + errs + ' 个错误（见下方）') : '') +
+          (hadPluginApps ? '；已重置自定义应用窗口' : ''));
+      });
+      // 打开目录
+      const openBtn = body.querySelector('#act-opendir');
+      if (openBtn) openBtn.addEventListener('click', async () => {
+        if (!IS_ELECTRON) { toast('仅 Electron 下可用'); return; }
+        const dir = (State.settings.actionsDir && State.settings.actionsDir.trim()) || (await window.electronAPI.actionsEnsureDefaultDir()).dir;
+        const r = await window.electronAPI.actionsOpenFolder(dir);
+        if (!r.ok) toast('打开失败: ' + r.msg);
+      });
+    };
+    renderAll();
+    meta._refresh = renderAll;
+    // 登记刷新函数，供服务插件通过 api.setStatus() 实时更新显示
+    refreshServicePanel = renderAll;
+    meta.cleanup = () => { if (refreshServicePanel === renderAll) refreshServicePanel = null; };
+  }
+});
+
+
+/* ============================================================
+ * 剪贴板历史（渲染层，Electron 专属）
+ * ============================================================ */
+const Clips = {
+  items: [],
+  applySettings() {
+    if (!IS_ELECTRON) return;
+    const s = State.settings;
+    if (s.clipPath) {
+      window.electronAPI.clipSetPath(s.clipPath).then(r => {
+        if (r && r.ok) {
+          window.electronAPI.clipStart();
+          toast('剪贴板历史已开启');
+        } else toast((r && r.msg) || '剪贴板历史开启失败');
+      });
+    } else {
+      window.electronAPI.clipStop();
+    }
+  },
+  async init() {
+    if (!IS_ELECTRON) return;
+    const s = State.settings;
+    if (s.clipPath) {
+      await window.electronAPI.clipSetPath(s.clipPath);
+      window.electronAPI.clipStart();
+    }
+    window.electronAPI.onClipUpdate(items => { Clips.items = items; Clips.refresh(); });
+    Clips.items = await window.electronAPI.clipGetItems();
+    Clips.refresh();
+  },
+  refresh() {
+    const box = document.querySelector('[data-clip-list]');
+    if (!box) return;
+    if (!Clips.items.length) { box.innerHTML = '<div style="padding:20px;color:var(--text-dim);text-align:center;">暂无剪贴记录（复制文本或图片后自动记录）</div>'; return; }
+    box.innerHTML = '';
+    Clips.items.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'clip-item';
+      el.innerHTML = `
+        ${item.type === 'image'
+          ? `<img class="clip-thumb" src="file:///${item.imgPath.replace(/\\/g,'/')}" onerror="this.style.display='none'">`
+          : ''}
+        <div class="clip-body">
+          <div class="clip-text">${item.type === 'image' ? '🖼️ 图片' : esc(item.text || '')}</div>
+          <div class="clip-meta">${new Date(item.time).toLocaleTimeString()} ${item.pinned ? '· 📌 固定' : ''}</div>
+        </div>
+        <div class="clip-actions">
+          <button class="c-copy" title="复制">📋</button>
+          <button class="c-pin" title="固定/取消">📌</button>
+          <button class="c-del" title="删除">✖</button>
+        </div>`;
+      el.querySelector('.c-copy').addEventListener('click', e => { e.stopPropagation(); Clips.copy(item); });
+      el.querySelector('.c-pin').addEventListener('click', e => { e.stopPropagation(); window.electronAPI.clipPin(item.id); });
+      el.querySelector('.c-del').addEventListener('click', e => { e.stopPropagation(); window.electronAPI.clipDelete(item.id); });
+      el.addEventListener('click', () => Clips.copy(item));
+      box.appendChild(el);
+    });
+    Motion.stagger(box, '.clip-item', 10);
+  },
+  copy(item) {
+    if (item.type === 'text') window.electronAPI.clipCopyText(item.text);
+    else window.electronAPI.clipCopyImage(item.imgPath);
+      if (IS_ELECTRON) window.electronAPI.clipDelete(item.id);
+    toast('已复制到剪贴板');
+  }
+};
+
+/* ============================================================
+ * 新应用：计算器 / 剪贴板历史 / 文件传输
+ * ============================================================ */
+
+/* ---------- 计算器（带历史 + 完整算式显示） ---------- */
+const Calc = {
+  display: '',
+  prev: null,
+  op: null,
+  waitingOperand: false,
+  lastResult: null,
+  history: [],
+
+  // 生成显示区的完整算式文本
+  formula() {
+    if (this.op != null) {
+      return `${this.prev || ''} ${this.op} ${this.display}`.replace(/\s+/g, ' ').trim();
+    }
+    if (this.lastResult != null) return this.lastResult;
+    return this.display || '0';
+  },
+  renderDisplay(el) { el.textContent = this.formula(); },
+
+  inputDigit(d, el) {
+    if (this.waitingOperand) { this.display = ''; this.waitingOperand = false; this.lastResult = null; }
+    if (d === '.' && this.display.includes('.')) return;
+    this.display += d;
+    this.renderDisplay(el);
+  },
+  setOp(op, el) {
+    if (this.display === '' && this.prev == null) return;
+    if (this.op && !this.waitingOperand && this.display !== '') this.calc();
+    this.prev = this.display === '' ? this.prev : this.display;
+    this.op = op;
+    this.display = '';
+    this.waitingOperand = true;
+    this.lastResult = null;
+    this.renderDisplay(el);
+  },
+  calc() {
+    if (this.op == null || this.prev == null || this.display === '') return;
+    const a = parseFloat(this.prev), b = parseFloat(this.display);
+    let r;
+    switch (this.op) {
+      case '+': r = a + b; break;
+      case '-': r = a - b; break;
+      case '*': r = a * b; break;
+      case '/': r = b === 0 ? '错误' : a / b; break;
+      default: return;
+    }
+    const expr = `${this.prev} ${this.op} ${this.display} = ${r}`;
+    this.history.unshift(expr);
+    if (this.history.length > 100) this.history.pop();
+    this.lastResult = expr;
+    this.prev = null; this.op = null; this.display = String(r); this.waitingOperand = true;
+  },
+  renderHistory(box) {
+    if (!box) return;
+    box.innerHTML = '';
+    if (!this.history.length) { box.innerHTML = '<div class="title" style="color:var(--text-dim);">暂无记录</div>'; return; }
+    box.innerHTML = '<div class="title">历史</div>';
+    this.history.forEach(ex => {
+      const d = document.createElement('div');
+      d.className = 'h-item';
+      d.textContent = ex;
+      d.addEventListener('click', () => {
+        const idx = ex.lastIndexOf('=');
+        const val = ex.slice(idx + 1).trim();
+        if (!isNaN(parseFloat(val))) this.display = String(parseFloat(val));
+        this.lastResult = null; this.prev = null; this.op = null; this.waitingOperand = false;
+      });
+      box.appendChild(d);
+    });
+  }
+};
+
+registerApp({
+  id: 'calc',
+  name: '计算器',
+  icon: '🧮',
+  w: 360, h: 300,
+  render(body, meta) {
+    body.innerHTML = `
+      <div class="calc-wrap">
+        <div class="calc-main">
+          <div class="calc-display" id="calc-display">0</div>
+          <div class="calc-grid">
+            <button data-a="C">C</button><button data-a="±">±</button><button data-a="%">%</button><button data-a="/" class="op">÷</button>
+            <button data-a="7">7</button><button data-a="8">8</button><button data-a="9">9</button><button data-a="*" class="op">×</button>
+            <button data-a="4">4</button><button data-a="5">5</button><button data-a="6">6</button><button data-a="-" class="op">−</button>
+            <button data-a="1">1</button><button data-a="2">2</button><button data-a="3">3</button><button data-a="+" class="op">+</button>
+            <button data-a="0">0</button><button data-a=".">.</button><button data-a="=" class="eq">=</button>
+          </div>
+        </div>
+        <div class="calc-history" id="calc-history"></div>
+      </div>`;
+    const disp = $('#calc-display', body);
+    const archBox = $('#calc-history', body);
+    Calc.renderHistory(archBox);
+    $$('button', body).forEach(b => {
+      b.addEventListener('click', () => {
+        const a = b.dataset.a;
+        if (a === 'C') { Calc.display = ''; Calc.prev = null; Calc.op = null; Calc.waitingOperand = false; Calc.lastResult = null; Calc.renderDisplay(disp); }
+        else if (a === '=') { Calc.calc(); Calc.renderDisplay(disp); }
+        else if (['+','-','*','/'].includes(a)) { Calc.setOp(a, disp); }
+        else if (a === '±') { Calc.display = Calc.display ? String(-parseFloat(Calc.display)) : ''; Calc.renderDisplay(disp); }
+        else if (a === '%') { Calc.display = Calc.display ? String(parseFloat(Calc.display)/100) : ''; Calc.renderDisplay(disp); }
+        else Calc.inputDigit(a, disp);
+        Calc.renderHistory(archBox);
+      });
+    });
+  }
+});
+
+/* ---------- 剪贴板历史窗口 ---------- */
+registerApp({
+  id: 'clipboard',
+  name: '剪贴板历史',
+  icon: '📋',
+  w: 460, h: 520,
+  render(body, meta) {
+    body.innerHTML = `
+      <div class="clip-wrap">
+        <div class="clip-toolbar">
+          <button class="btn sm" id="clip-clear-fixed">🗑 清除</button>
+          <span class="hint">${IS_ELECTRON ? '复制文本/图片会自动记录，点击即复制' : '仅 Electron 下可用'}</span>
+        </div>
+        <div class="clip-list" data-clip-list></div>
+      </div>`;
+    if (IS_ELECTRON) {
+      $('#clip-clear-fixed').addEventListener('click', () => {
+        Clips.items.slice().forEach(i => { if (!i.pinned) window.electronAPI.clipDelete(i.id); });
+        toast('已清除非固定的记录');
+      });
+      Clips.refresh();
+    } else {
+      $('#clip-clear-fixed').addEventListener('click', () => toast('剪贴板历史仅在 Electron 下可用'));
+    }
+  }
+});
+
+/* ---------- 文件传输窗口（QQ 式聊天界面） ---------- */
+registerApp({
+  id: 'transfer',
+  name: '文件传输',
+  icon: '📤',
+  w: 560, h: 560,
+  render(body, meta) {
+    body.innerHTML = `
+      <style>
+      .ts-chat-wrap{display:flex;flex-direction:column;height:100%;gap:8px;}
+      .ts-status{font-size:12px;line-height:1.6;color:var(--text-dim);background:rgba(255,255,255,0.03);
+        border:1px solid var(--border);border-radius:8px;padding:8px 10px;flex:0 0 auto;}
+      .ts-status .addr{color:#4da3ff;font-weight:600;user-select:text;}
+      .ts-hd{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+      .ts-hd .ttl{flex:1;font-size:12px;color:var(--text-dim);}
+      .ts-msgs{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;
+        padding:8px;border:1px solid var(--border);border-radius:8px;background:rgba(0,0,0,0.12);}
+      .ts-bub{max-width:80%;padding:8px 11px;border-radius:12px;font-size:13px;line-height:1.5;
+        word-break:break-word;white-space:pre-wrap;position:relative;}
+      .ts-bub.mine{align-self:flex-end;background:#2b6cb0;color:#fff;border-bottom-right-radius:3px;}
+      .ts-bub.theirs{align-self:flex-start;background:rgba(255,255,255,0.10);color:var(--text);
+        border:1px solid var(--border);border-bottom-left-radius:3px;}
+      .ts-bub .who{font-size:11px;opacity:.75;margin-bottom:3px;}
+      .ts-bub .meta{font-size:11px;opacity:.7;margin-top:4px;}
+      .ts-bub .fname{font-weight:600;cursor:pointer;}
+      .ts-bub .fname:hover{text-decoration:underline;}
+      .ts-bub .acts{margin-top:5px;display:flex;gap:8px;flex-wrap:wrap;}
+      .ts-bub .act{font-size:11px;color:#9ecbff;cursor:pointer;text-decoration:underline;}
+      .ts-bub .imgwrap{margin-top:6px;position:relative;min-height:20px;}
+      .ts-bub .imgwrap img{max-width:100%;max-height:260px;border-radius:8px;display:block;cursor:zoom-in;
+        background:rgba(0,0,0,0.15);}
+      .ts-bub .imgload{font-size:11px;opacity:.7;}
+      .ts-bub .imgfail{font-size:11px;opacity:.7;}
+      .ts-lightbox{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);
+        display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:20px;}
+      .ts-lightbox img{max-width:96vw;max-height:94vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.6);}
+      .ts-empty{color:var(--text-dim);text-align:center;padding:24px 0;font-size:13px;}
+      .ts-input{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;}
+      .ts-input textarea{width:100%;box-sizing:border-box;resize:none;background:rgba(255,255,255,0.05);
+        color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:13px;
+        font-family:inherit;outline:none;}
+      .ts-input textarea:focus{border-color:#4da3ff;}
+      .ts-btnrow{display:flex;gap:6px;align-items:center;}
+      .ts-tip{font-size:11px;color:var(--text-dim);flex:1;}
+      .ts-progress{flex:0 0 auto;}
+      </style>
+      <div class="ts-chat-wrap">
+        <div class="ts-status" id="ts-status">加载中…</div>
+        <div class="ts-progress" id="ts-progress" style="display:none;">
+          <div id="ts-name" style="font-size:12px;">—</div>
+          <div class="bar"><div class="fill" id="ts-fill"></div></div>
+          <div id="ts-percent" style="font-size:12px;color:var(--text-dim);margin-top:2px;"></div>
+        </div>
+        <div class="ts-hd">
+          <span class="ttl">聊天记录（手机 ↔ 电脑）</span>
+          <button class="btn sm" id="ts-clear">🗑 清除记录</button>
+        </div>
+        <div class="ts-msgs" id="ts-msgs"><div class="ts-empty">加载中…</div></div>
+        <div class="ts-input">
+          <textarea id="ts-text" rows="2" placeholder="输入文字后点“发送文字”；也可直接粘贴文件（Ctrl+V）"></textarea>
+          <div class="ts-btnrow">
+            <span class="ts-tip" id="ts-tip">提示：手机发来的内容会显示为对方消息</span>
+            <button class="btn sm" id="ts-send-file">📎 发送文件</button>
+            <button class="btn sm primary" id="ts-send-text">发送文字</button>
+          </div>
+        </div>
+      </div>`;
+
+    meta.cleanup = () => {
+      if (IS_ELECTRON) window.electronAPI.transferStop();
+      window.removeEventListener('beforeunload', blockClose);
+      meta.cantClose = () => !!meta.transferBusy;
+      // 清理可能残留的放大查看层
+      const lb = document.querySelector('.ts-lightbox');
+      if (lb && lb.parentNode) lb.parentNode.removeChild(lb);
+      const cm = document.querySelector('#ts-ctxmenu');
+      if (cm && cm.parentNode) cm.parentNode.removeChild(cm);
+    };
+    meta.cantClose = () => !!meta.transferBusy;
+    const blockClose = (e) => {
+      if (meta.transferBusy) { e.preventDefault(); toast('传输进行中，无法关闭'); }
+    };
+    window.addEventListener('beforeunload', blockClose);
+
+    function render(st) {
+      if (!st) return;
+      if (st.running) {
+        const dirName = esc(st.dir || '未设置');
+        const shareName = esc(st.shareDir || '未设置');
+        $('#ts-status').innerHTML = `✅ 服务器运行中 · 手机访问：<span class="addr">http://${st.ip}:${st.port}</span><br>` +
+          `📥 手机上传保存到：${dirName}<br>📤 手机可下载共享目录：${shareName}`;
+        if (st.current) {
+          const c = st.current;
+          meta.transferBusy = true;
+          const pct = c.size ? Math.min(100, Math.round(c.received / c.size * 100)) : 0;
+          $('#ts-progress').style.display = 'block';
+          $('#ts-name').textContent = '接收中：' + c.name;
+          $('#ts-fill').style.width = pct + '%';
+          $('#ts-percent').textContent = pct + '% (' + Math.round(c.received/1024) + 'KB / ' + Math.round(c.size/1024) + 'KB)';
+        } else {
+          meta.transferBusy = false;
+          $('#ts-progress').style.display = 'none';
+        }
+      } else {
+        $('#ts-status').textContent = '服务器未运行';
+        meta.transferBusy = false;
+        $('#ts-progress').style.display = 'none';
+      }
+    }
+
+    if (!IS_ELECTRON) {
+      $('#ts-status').textContent = '文件传输仅在 Electron 下可用';
+      return;
+    }
+
+    const s = State.settings;
+    if (!s.transferPath) {
+      $('#ts-status').textContent = '⚠ 请先在设置里填写"文件传输保存路径"';
+      return;
+    }
+
+    /* ---------- 聊天消息渲染 ---------- */
+    let msgs = [];
+
+    function fmtSize(n) {
+      n = Number(n) || 0;
+      if (n < 1024) return n + ' B';
+      if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+      if (n < 1073741824) return (n/1048576).toFixed(1) + ' MB';
+      return (n/1073741824).toFixed(2) + ' GB';
+    }
+    function fmtTime(t) {
+      try { return new Date(t).toLocaleString(); } catch (e) { return ''; }
+    }
+
+    function copyText(text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(() => toast('已复制'), () => toast('复制失败'));
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text; document.body.appendChild(ta); ta.select();
+          document.execCommand('copy'); ta.remove(); toast('已复制');
+        }
+      } catch (e) { toast('复制失败：' + (e.message || e)); }
+    }
+
+    /* 点图片放大查看 */
+    let lightboxEl = null;
+    function closeLightbox() {
+      if (lightboxEl && lightboxEl.parentNode) lightboxEl.parentNode.removeChild(lightboxEl);
+      lightboxEl = null;
+    }
+    function openLightbox(dataUrl) {
+      closeLightbox();
+      lightboxEl = document.createElement('div');
+      lightboxEl.className = 'ts-lightbox';
+      const im = document.createElement('img');
+      im.src = dataUrl;
+      lightboxEl.appendChild(im);
+      lightboxEl.addEventListener('click', closeLightbox);
+      document.body.appendChild(lightboxEl);
+    }
+
+    function renderMessages() {
+      const box = $('#ts-msgs');
+      if (!box) return;
+      if (!msgs.length) {
+        box.innerHTML = '<div class="ts-empty">还没有消息<br>把手机连到同一 WiFi 打开上面的地址，或在这里发送内容</div>';
+        return;
+      }
+      box.innerHTML = '';
+      // msgs 是新→旧，聊天按旧→新显示
+      msgs.slice().reverse().forEach(m => {
+        const mine = m.dir === 'pc';
+        const el = document.createElement('div');
+        el.className = 'ts-bub ' + (mine ? 'mine' : 'theirs');
+
+        let html = '<div class="who">' + (mine ? '我（电脑）' : '手机') + '</div>';
+        if (m.kind === 'text') {
+          html += '<div class="body"></div>';
+        } else {
+          const isImg = !!(m.name && /\.(png|jpe?g|gif|webp|bmp)$/i.test(m.name));
+          html += '<div><span class="fname">📄 ' + esc(m.name || '(文件)') + '</span></div>' +
+                  '<div class="meta">' + fmtSize(m.size) + '</div>' +
+                  (isImg && m.path ? '<div class="imgwrap"><span class="imgload">预览加载中…</span></div>' : '');
+        }
+        html += '<div class="meta">' + fmtTime(m.time) + '</div>';
+        html += '<div class="acts"></div>';
+        el.innerHTML = html;
+
+        // 文字用 textContent 写入，避免任何 HTML 注入
+        if (m.kind === 'text') el.querySelector('.body').textContent = m.text == null ? '' : String(m.text);
+
+        // 图片文件：异步加载清晰预览（0.5x），点击可放大
+        const iw = el.querySelector('.imgwrap');
+        if (iw && m.path) {
+          window.electronAPI.transferImagePreview(m.path, 'preview').then(r => {
+            if (!r || !r.ok) {
+              iw.innerHTML = '<span class="imgfail">（无法预览此图片）</span>';
+              return;
+            }
+            const im = document.createElement('img');
+            im.src = r.dataUrl;
+            im.alt = m.name || '';
+            im.title = '点击放大';
+            im.addEventListener('click', (ev) => { ev.stopPropagation(); openLightbox(r.dataUrl); });
+            iw.innerHTML = '';
+            iw.appendChild(im);
+          }).catch(() => { iw.innerHTML = '<span class="imgfail">（预览失败）</span>'; });
+        }
+
+        const acts = el.querySelector('.acts');
+
+        if (m.kind === 'text') {
+          const a = document.createElement('span');
+          a.className = 'act'; a.textContent = '复制文字';
+          a.addEventListener('click', () => copyText(m.text == null ? '' : String(m.text)));
+          acts.appendChild(a);
+        } else if (m.path) {
+          const a1 = document.createElement('span');
+          a1.className = 'act'; a1.textContent = '打开';
+          a1.addEventListener('click', () => window.electronAPI.openPath(m.path));
+          acts.appendChild(a1);
+          const a2 = document.createElement('span');
+          a2.className = 'act'; a2.textContent = '定位';
+          a2.addEventListener('click', () => window.electronAPI.showInFolder(m.path));
+          acts.appendChild(a2);
+          const a3 = document.createElement('span');
+          a3.className = 'act'; a3.textContent = '复制路径';
+          a3.addEventListener('click', () => copyText(m.path));
+          acts.appendChild(a3);
+          // 文件名双击直接打开
+          el.querySelector('.fname').addEventListener('dblclick', () => window.electronAPI.openPath(m.path));
+        }
+
+        // 右键菜单：快捷复制
+        el.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const items = [];
+          if (m.kind === 'text') {
+            items.push({ label: '📋 复制文字', run: () => copyText(m.text == null ? '' : String(m.text)) });
+          } else {
+            const isImg = !!(m.name && /\.(png|jpe?g|gif|webp|bmp)$/i.test(m.name));
+            if (m.path && isImg) {
+              items.push({ label: '🔍 查看大图', run: () => {
+                window.electronAPI.transferImagePreview(m.path, 'preview').then(r => {
+                  if (r && r.ok) openLightbox(r.dataUrl);
+                  else toast('无法预览：' + ((r && r.msg) || ''));
+                });
+              } });
+            }
+            if (m.path) {
+              items.push({ label: '📋 复制文件路径', run: () => copyText(m.path) });
+              items.push({ label: '📂 打开文件', run: () => window.electronAPI.openPath(m.path) });
+              items.push({ label: '🗂 定位到文件夹', run: () => window.electronAPI.showInFolder(m.path) });
+            }
+            if (m.name) items.push({ label: '📋 复制文件名', run: () => copyText(m.name) });
+          }
+          showContextMenu(e.clientX, e.clientY, items);
+        });
+
+        box.appendChild(el);
+      });
+      box.scrollTop = box.scrollHeight;
+    }
+
+    /* 简易右键菜单 */
+    let ctxEl = null;
+    function hideContextMenu() {
+      if (ctxEl && ctxEl.parentNode) ctxEl.parentNode.removeChild(ctxEl);
+      ctxEl = null;
+    }
+    function showContextMenu(x, y, items) {
+      hideContextMenu();
+      if (!items || !items.length) return;
+      ctxEl = document.createElement('div');
+      ctxEl.id = 'ts-ctxmenu';
+      ctxEl.style.cssText = 'position:fixed;z-index:99999;background:#2a2a35;border:1px solid #444;' +
+        'border-radius:6px;padding:4px;box-shadow:0 6px 20px rgba(0,0,0,.4);min-width:150px;font-size:13px;';
+      items.forEach(it => {
+        const d = document.createElement('div');
+        d.textContent = it.label;
+        d.style.cssText = 'padding:6px 10px;cursor:pointer;border-radius:4px;color:#eee;white-space:nowrap;';
+        d.addEventListener('mouseenter', () => { d.style.background = '#3a3a4a'; });
+        d.addEventListener('mouseleave', () => { d.style.background = 'transparent'; });
+        d.addEventListener('click', () => { hideContextMenu(); it.run(); });
+        ctxEl.appendChild(d);
+      });
+      ctxEl.style.left = Math.min(x, window.innerWidth - 170) + 'px';
+      ctxEl.style.top = Math.min(y, window.innerHeight - 20 - items.length * 30) + 'px';
+      document.body.appendChild(ctxEl);
+      setTimeout(() => {
+        const off = (ev) => { hideContextMenu(); document.removeEventListener('mousedown', off); };
+        document.addEventListener('mousedown', off);
+      }, 0);
+    }
+
+    async function refreshMessages() {
+      try {
+        const list = await window.electronAPI.transferGetMessages();
+        msgs = Array.isArray(list) ? list : [];
+        renderMessages();
+      } catch (e) { /* ignore */ }
+    }
+
+    /* ---------- 发送 ---------- */
+    async function sendCurrentText() {
+      const ta = $('#ts-text');
+      const v = ta ? ta.value : '';
+      if (!v.trim()) { toast('请输入内容'); return; }
+      const r = await window.electronAPI.transferSendText(v);
+      if (!r || !r.ok) { toast('发送失败：' + ((r && r.msg) || '')); return; }
+      ta.value = '';
+      await refreshMessages();
+      toast('已发送到手机');
+    }
+
+    async function pickAndSendFiles() {
+      // selectFiles 返回字符串路径数组（已支持多选），取消时返回 null
+      const files = await window.electronAPI.selectFiles();
+      if (!files || !files.length) return;
+      const paths = files.map(f => (typeof f === 'string' ? f : (f && f.path))).filter(Boolean);
+      if (!paths.length) return;
+      const r = await window.electronAPI.transferSendFiles(paths);
+      await refreshMessages();
+      if (r && r.failed && r.failed.length) toast('部分失败：' + r.failed.join('；'), 3500);
+      else toast('已加入发送列表（' + ((r && r.sent) ? r.sent.length : paths.length) + ' 个）');
+    }
+
+    /* 粘贴：支持文字与文件 */
+    async function handlePaste(e) {
+      const dt = e.clipboardData;
+      if (!dt) return;
+      // 优先处理文件
+      const files = [];
+      if (dt.files && dt.files.length) {
+        for (const f of dt.files) files.push(f);
+      }
+      if (files.length) {
+        const paths = files.map(f => {
+          // Electron 里 File 对象带 path 属性
+          return f.path || null;
+        }).filter(Boolean);
+        if (paths.length) {
+          e.preventDefault();
+          const r = await window.electronAPI.transferSendFiles(paths);
+          await refreshMessages();
+          toast('已加入发送列表（' + paths.length + ' 个）');
+          return;
+        }
+        // 浏览器式 File（无 path）：走上传到本机接收目录的方式不可用，提示用户
+        e.preventDefault();
+        toast('无法获取该文件的路径，请用“📎 发送文件”选择', 3500);
+        return;
+      }
+      // 文字交给 textarea 默认行为
+    }
+
+    const ta = $('#ts-text');
+    ta.addEventListener('keydown', (e) => {
+      // Ctrl+Enter 发送（Enter 保留换行）
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendCurrentText(); }
+    });
+    ta.addEventListener('paste', handlePaste);
+
+    $('#ts-send-text').addEventListener('click', sendCurrentText);
+    $('#ts-send-file').addEventListener('click', pickAndSendFiles);
+    $('#ts-clear').addEventListener('click', async () => {
+      const r = await window.electronAPI.transferClearMessages();
+      if (r && r.ok) { await refreshMessages(); toast('聊天记录已清除（已接收的文件不会被删除）'); }
+    });
+
+    /* ---------- 事件订阅 ---------- */
+    window.electronAPI.onTransferMessageList((list) => {
+      msgs = Array.isArray(list) ? list : [];
+      renderMessages();
+    });
+    window.electronAPI.onTransferReceived((info) => {
+      toast(info.isText ? '📩 收到手机发来的文字' : '📥 已收到文件：' + info.name);
+    });
+
+    refreshMessages();
+
+    const shareDir = (s.transferShareDir && s.transferShareDir.trim()) || s.transferPath;
+    window.electronAPI.transferStart(s.transferPort, s.transferPath, shareDir).then(res => {
+      if (!res.ok) { $('#ts-status').textContent = '启动失败：' + (res.msg || ''); return; }
+      render(res.status);
+    });
+    window.electronAPI.onTransferStatus(render);
+    window.electronAPI.transferGetStatus().then(render);
+  }
+});
+
+/* ============================================================
+ * 快照系统（仅手动保存 / 导出 / 导入）
+ * ============================================================ */
+function persistAll(showToastMsg) {
+  // 收集窗口状态
+  State.windows = Object.values(WindowManager.windows).map(m => {
+    const r = m.el.getBoundingClientRect();
+    return { id: m.id, appId: m.appId, x: r.left, y: r.top, w: r.width, h: r.height, minimized: m.minimized, maximized: m.maximized };
+  });
+  // 浏览器模式下 objectURL 刷新后失效，保存时去掉 url，仅保留名称/路径等
+  State.playlists.music = MusicPlayer.playlist.map(t => ({
+    name: t.name,
+    url: IS_ELECTRON ? (t.url || null) : null,   // 浏览器模式不存 objectURL
+    dataUrl: t.dataUrl,
+    path: t.path,
+    cover: t.cover
+  }));
+  State.playlists.musicIndex = MusicPlayer.index;
+  Store.save();
+  if (showToastMsg) toast('✓ 快照已保存');
+  return State;
+}
+
+function applyTheme() {
+  const s = State.settings;
+  const root = document.documentElement.style;
+  root.setProperty('--font-family', s.fontFamily && s.fontFamily !== 'default' ? s.fontFamily : '"Segoe UI","Microsoft YaHei",system-ui,sans-serif');
+  root.setProperty('--font-size', (s.fontSize || 15) + 'px');
+}
+
+function applyWallpaper() {
+  const s = State.settings;
+  if (s.wallpaper) {
+    wallpaperEl.style.backgroundImage = `url(${s.wallpaper})`;
+    desktopEl.style.background = 'transparent';
+  } else {
+    wallpaperEl.style.backgroundImage = '';
+    desktopEl.style.background = 'var(--desktop-bg)';
+  }
+}
+
+function exportSnapshot() {
+  const data = JSON.stringify(persistAll(), null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'workbench-snapshot-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+  toast('已导出快照文件');
+}
+
+function importSnapshot(file) {
+  // 限制导入大小（最多 10MB）
+  if (file.size > 10 * 1024 * 1024) {
+    toast('导入失败：文件太大（超过 10MB）', 3500);
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      // 结构校验：必须是对象，且含必要字段
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        toast('导入失败：不是有效的快照文件', 3500);
+        return;
+      }
+      const def = Store.defaultState();
+      // 仅合并已知字段的合法类型
+      const merged = Object.assign({}, def, data);
+      if (Array.isArray(data.notes)) merged.notes = data.notes;
+      if (Array.isArray(data.alarms)) merged.alarms = data.alarms;
+      if (Array.isArray(data.fileArea)) merged.fileArea = data.fileArea;
+      if (data.settings && typeof data.settings === 'object') merged.settings = Object.assign({}, def.settings, data.settings);
+      // 逐字段合并回 State
+      Object.keys(def).forEach(k => { if (k in merged) State[k] = merged[k]; });
+      State.settings = merged.settings || def.settings;
+      State.notes = Array.isArray(merged.notes) ? merged.notes : [];
+      State.alarms = Array.isArray(merged.alarms) ? merged.alarms : [];
+      State.fileArea = Array.isArray(merged.fileArea) ? merged.fileArea : [];
+      // 清除现有便签 DOM 后重建
+      Notes.els.forEach(m => m.el.remove());
+      Notes.els.clear();
+      applyTheme(); applyWallpaper(); renderDesktopIcons(); Notes.init(); MusicPlayer.renderPlaylist();
+      toast('✓ 快照已导入');
+    } catch (e) { toast('导入失败：' + e.message, 3500); }
+  };
+  reader.readAsText(file);
+}
+
+/* ---------- 提示音（WebAudio 生成） ---------- */
+let beepCtx = null;
+function beep() {
+  if (State.settings.soundEnabled === false) return;
+  try {
+    beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = beepCtx.createOscillator();
+    const g = beepCtx.createGain();
+    o.connect(g); g.connect(beepCtx.destination);
+    o.frequency.value = 880; g.gain.value = 0.2;
+    o.start();
+    setTimeout(() => { try { o.stop(); } catch(e){} }, 400);
+    setTimeout(() => {
+      const o2 = beepCtx.createOscillator(); const g2 = beepCtx.createGain();
+      o2.connect(g2); g2.connect(beepCtx.destination);
+      o2.frequency.value = 660; g2.gain.value = 0.2; o2.start();
+      setTimeout(() => { try { o2.stop(); } catch(e){} }, 400);
+    }, 500);
+  } catch (e) {}
+}
+
+/* ---------- 闹钟轮询 ---------- */
+function alarmLoop() {
+  const now = new Date();
+  const cur = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+  (State.alarms || []).forEach(a => {
+    if (!a.enabled) return;
+    if (a.time === cur && a.firedFor !== cur) {
+      a.firedFor = cur;
+      beep();
+      toast('⏰ 闹钟响！' + (a.label ? '（' + a.label + '）' : ''));
+      try { new Notification('个人工作台', { body: '闹钟：' + (a.label || a.time) }); } catch(e){}
+    }
+  });
+}
+setInterval(alarmLoop, 60000);
+
+/* ---------- 文件输入绑定 ---------- */
+// 桌面背景（修复：覆盖 size/position 由 CSS 提供，此处仅设置图片）
+$('#wallpaper-picker').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    State.settings.wallpaper = reader.result;
+    applyWallpaper();
+    toast('桌面背景已更换');
+  };
+  reader.readAsDataURL(f);
+  e.target.value = '';
+});
+// 快照导入
+$('#snapshot-import').addEventListener('change', e => {
+  if (e.target.files[0]) importSnapshot(e.target.files[0]);
+  e.target.value = '';
+});
+
+/* ---------- 快捷键 ---------- */
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  const isTyping = tag === 'input' || tag === 'textarea' || e.target.isContentEditable;
+  // Ctrl+S 保存快照（任何时候响应）
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    persistAll(true);
+  }
+  // 新建便签：改为 Ctrl+Alt+N（不占用浏览器 Ctrl+T）
+  if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.key.toLowerCase() === 'n' && !isTyping) {
+    e.preventDefault();
+    Notes.create();
+  }
+});
+
+/* ---------- 任务栏：后台模式指示器 ----------
+ * ⚡ 显示 = 保持活跃（始终满速，切走再回来不卡顿）
+ * 不显示 = 允许挂起（省资源，回来可能需热身）
+ * 点击图标 = 切换（与 Alt+X 等效）
+ */
+const KeepAliveIndicator = {
+  el: null,
+  value: false,
+
+  init() {
+    this.el = $('#btn-keepalive');
+    if (!this.el) return;
+    this.el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggle();
+    });
+    this.refresh();
+  },
+
+  /* 从主进程读取并更新显示 */
+  async refresh() {
+    if (!IS_ELECTRON || !window.electronAPI || !window.electronAPI.getKeepAlive) return;
+    try {
+      const r = await window.electronAPI.getKeepAlive();
+      if (r && r.ok) this.apply(!!r.keepAlive);
+    } catch (e) { /* 忽略 */ }
+  },
+
+  apply(v) {
+    this.value = !!v;
+    if (!this.el) return;
+    this.el.style.display = this.value ? '' : 'none';
+    this.el.title = this.value
+      ? '后台模式：保持活跃（始终满速）· 点击切换为「允许挂起」'
+      : '后台模式：允许挂起';
+  },
+
+  async toggle() {
+    if (!IS_ELECTRON || !window.electronAPI || !window.electronAPI.applyKeepAlive) {
+      toast('切换后台模式仅在 Electron 下可用');
+      return;
+    }
+    // 传输进行中不重建，避免中断
+    try {
+      if (window.electronAPI.transferGetStatus) {
+        const st = await window.electronAPI.transferGetStatus();
+        if (st && st.current) { toast('文件传输进行中，暂不切换（避免中断传输）', 3200); return; }
+      }
+    } catch (e) { /* 忽略 */ }
+
+    const next = !this.value;
+    // 先保存快照，保证重建后布局能恢复
+    try { if (typeof persistAll === 'function') persistAll(false); } catch (e) {}
+    try {
+      const r = await window.electronAPI.applyKeepAlive(next);
+      // 正常情况下窗口会重建、本页被销毁，下面执行不到。
+      // 但若重建被跳过或失败，必须让指示器与主进程保持一致，
+      // 否则 ⚡ 会显示错误的状态，比"没有指示"更糟。
+      if (r && typeof r.keepAlive === 'boolean') this.apply(r.keepAlive);
+      else this.apply(next);
+    } catch (e) {
+      toast('切换失败：' + ((e && e.message) || e), 3200);
+    }
+  }
+};
+
+/* ---------- 任务栏按钮（修复：左上角图标 = 显示桌面，带反馈） ---------- */
+$('#btn-music-pop').addEventListener('click', e => {
+  e.stopPropagation();
+  musicPopEl.classList.toggle('show');
+});
+$('#btn-show-desktop').addEventListener('click', () => {
+  const hadWindows = Object.keys(WindowManager.windows).length > 0;
+  WindowManager.showDesktop();
+  if (hadWindows) toast('已显示桌面');
+  else toast('桌面已经显示');
+});
+
+/* ---------- 初始化启动 ---------- */
+function boot() {
+  // 锁定内建应用 id（必须在加载任何外部插件之前），防止自定义 JS 静默顶掉内建应用
+  BuiltinAppIds.clear();
+  Object.keys(AppRegistry).forEach(k => BuiltinAppIds.add(k));
+  applyTheme();
+  applyWallpaper();
+  renderDesktopIcons();
+  MusicPlayer.init();
+  Notes.init();
+    if (IS_ELECTRON) Clips.init();
+  // 后台模式指示器（重建窗口后需要重新同步显示）
+  try { KeepAliveIndicator.init(); } catch (e) { /* 忽略 */ }
+  // 加载快捷操作（Actions）并生成桌面图标
+  if (IS_ELECTRON) {
+    (async () => {
+      await ActionsEngine.loadAll(State.settings.actionsJsDir);
+      if (ActionsEngine.loadedActions.length) renderDesktopIcons(); // 桌面若需刷新（总入口本身已在桌面）
+      if (ActionsEngine.errors.length) ActionsEngine.showErrorSummary();
+    })();
+  }
+  // 恢复上次会话打开的窗口（仅当手动保存过窗口状态）
+  if (State.windows.length) {
+    State.windows.forEach(w => {
+      if (getApp(w.appId)) {
+        WindowManager.create(w.appId, { id: w.id, x: w.x, y: w.y, w: w.w, h: w.h });
+      }
+    });
+  }
+  // 首次使用：自动打开几个示例窗口
+  if (!State._booted) {
+    WindowManager.create('fileArea');
+    WindowManager.create('notes');
+    ['timer','alarm','music','clock'].forEach(id => { try { WindowManager.create(id); } catch(e){} });
+    State._booted = true;
+  }
+  setTimeout(() => toast('欢迎使用个人工作台 · Ctrl+S 保存 · Ctrl+Alt+N 新建便签', 4500), 800);
+}
+
+/* ---------- 便签管理窗口应用 ---------- */
+registerApp({
+  id: 'notes',
+  name: '便签管理',
+  icon: '🗒️',
+  w: 460, h: 500,
+  render(body, meta) {
+    const draw = () => {
+      body.innerHTML = `
+        <div class="row" style="margin-bottom:10px;">
+          <button class="btn primary" id="nb-new">＋ 新建便签</button>
+          <span style="font-size:12px;color:var(--text-dim);">鼠标移到某条上按 Del 可彻底删除</span>
+        </div>
+        ${State.notes.length ? '' : '<div style="color:var(--text-dim);text-align:center;padding:30px;">还没有便签，点上方新建</div>'}
+        <div id="nb-list"></div>
+      `;
+      const newBtn = body.querySelector('#nb-new');
+      if (newBtn) newBtn.addEventListener('click', () => Notes.create());
+      const listBox = body.querySelector('#nb-list');
+      if (listBox) renderList(listBox);
+    };
+
+    function renderList(box) {
+      box.innerHTML = '';
+      if (!State.notes.length) return;
+      State.notes.forEach(note => {
+        const item = document.createElement('div');
+        item.className = 'note-list-item';
+        item.dataset.noteId = note.id;
+        const status = note.closed ? '（已关闭）' : '';
+        item.innerHTML = `
+          <span class="nl-tag">${esc(note.tags || '无标签')}${esc(status)}</span>
+          <div class="nl-text">${esc(note.text || '（空）')}</div>
+          <div class="nl-actions">
+            ${note.closed
+              ? '<button class="nl-open">↩ 恢复</button>'
+              : '<button class="nl-close">🗕 关闭</button>'}
+            <button class="nl-del">✖ 删除</button>
+          </div>
+        `;
+        // 恢复 / 关闭
+        item.querySelector('.nl-open')?.addEventListener('click', e => { e.stopPropagation(); Notes.open(note.id); });
+        item.querySelector('.nl-close')?.addEventListener('click', e => { e.stopPropagation(); Notes.close(note.id); });
+        item.querySelector('.nl-del')?.addEventListener('click', e => { e.stopPropagation(); Notes.remove(note.id); });
+        // 单击列表项：若已关闭则恢复，若打开则聚焦桌面便签
+        item.addEventListener('click', () => {
+          if (note.closed) Notes.open(note.id);
+          else {
+            const meta = Notes.els.get(note.id);
+            if (meta) Notes.bringToFront(note.id);
+          }
+        });
+        // hover 高亮 + Del 彻底删除
+        item.addEventListener('mouseenter', () => item.classList.add('note-delete-hover'));
+        item.addEventListener('mouseleave', () => item.classList.remove('note-delete-hover'));
+        item.addEventListener('keydown', e => {}); // 占位，便于聚焦
+        box.appendChild(item);
+      });
+      Motion.stagger(box, '.note-list-item', 10);
+    }
+
+    // 全局监听：当鼠标悬停在某条便签列表项上时按 Del 彻底删除
+    const onKey = (e) => {
+      if (e.key !== 'Delete' && e.key !== 'Del') return;
+      const hovered = document.querySelector('.note-list-item.note-delete-hover');
+      if (hovered) {
+        e.preventDefault();
+        const id = hovered.dataset.noteId;
+        Notes.remove(id);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+
+    draw();
+    Notes.managerRefresh = draw;
+    meta.cleanup = () => {
+      Notes.managerRefresh = null;
+      document.removeEventListener('keydown', onKey);
+    };
+  }
+});
+
+// 启动
+boot();
+
+</script>
+</body>
+</html>
